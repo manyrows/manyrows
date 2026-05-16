@@ -1,4 +1,4 @@
-# ManyRows
+# ManyRows Auth
 
 Self-hostable user authentication you can drop in front of your apps.
 Sign-in, password reset, email verification, magic links, OAuth (Google,
@@ -9,7 +9,30 @@ One install runs many apps. Apps share users through user pools (one
 app or several SSO-style), with their own sign-in settings, OAuth
 credentials, and roles.
 
-> **Status:** in active development by a solo dev. Self-hosted only.
+> **Honest status.** ManyRows Auth is built by one developer. It runs
+> in production today — it powers sign-in for
+> [DrumKingdom.com](https://drumkingdom.com) — and is actively
+> developed, but there's no QA team, no SLA, and no claim it's
+> bug-free. Run it, kick the tyres, and satisfy yourself it holds up
+> before you put it in front of anything that matters. If something
+> breaks or feels wrong, that's a bug I want to hear about.
+>
+> **Help shape it.** Issues, reproductions, and PRs are genuinely
+> welcome — real-world use is what hardens an auth system. If it
+> almost-but-not-quite fits your case, say so; that feedback moves the
+> roadmap more than anything.
+>
+> **Why open source.** Authentication is security-critical
+> infrastructure — you shouldn't have to trust a black box with your
+> users' credentials. Open source means anyone can audit exactly what
+> the binary does, self-host it with no vendor lock-in, and fork it if
+> I ever step away. AGPL-3.0 keeps it that way; a commercial license is
+> available if those terms don't fit (see *License*).
+>
+> **Your data.** It's your Postgres. Users, sessions, audit logs —
+> query, join, export, or build on them directly in plain SQL. No
+> proprietary API, rate-limited dashboard, or export fee stands
+> between you and the data you own.
 
 ---
 
