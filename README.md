@@ -275,35 +275,6 @@ The runtime is served by your own binary at
 
 ---
 
-## Privacy: what this install does over the network
-
-ManyRows is self-hosted and does not phone home. The binary makes
-**no** outbound calls to any ManyRows-owned endpoint at runtime:
-
-- No analytics or telemetry
-- No update checks
-- No anonymous usage stats
-- No crash / error reporting
-- No license-server check-in
-
-The only outbound HTTP calls the binary ever makes are to destinations
-**you** configure:
-
-| Destination | When it fires |
-|---|---|
-| Webhook URLs you registered per-app | On every matching auth event |
-| OAuth provider endpoints (Google / Apple / Microsoft / GitHub) | Only when that provider is enabled on an app |
-| Cloudflare Turnstile siteverify | Only when `MANYROWS_TURNSTILE_ENABLED=true` |
-| Your SMTP relay | When SMTP is configured |
-
-That's the complete list. Operators with strict egress rules can
-allowlist exactly these and nothing else. The source of truth is
-`grep -rn 'http.New' manyrows-core/` — the only matches are the four
-auth-provider packages, the webhook dispatcher, and the Turnstile
-client.
-
----
-
 ## Architecture (one paragraph)
 
 Single Go binary (`manyrows-core`) with the admin UI bundle and the
