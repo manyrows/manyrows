@@ -1,0 +1,26 @@
+# IDE
+.idea/
+
+# Node / npm artefacts at repo root (each package has its own lockfile)
+/node_modules/
+/package-lock.json
+
+# Operator-local Docker config — copy of .env.example with real values.
+.env
+.env.local
+
+# Stray scratch
+/slug.tgz
+/app/
+
+# Embedded UI bundle — copied from manyrows-ui/dist at build time
+manyrows-core/web/*
+!manyrows-core/web/web.go
+
+# Embedded appkit bundle — built from appkit-ui at build time
+manyrows-core/appkit/appkit/
+# Unused build-artifact page: copied from appkit-ui/dist by the build,
+# NOT Go-embedded (appkit.go embeds the appkit/ dir + version.txt only).
+# Regenerated every build; already excluded from .dockerignore too.
+manyrows-core/appkit/index.html
+
