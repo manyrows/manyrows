@@ -330,22 +330,7 @@ The repo is an npm workspace at the root, so `npm install` from the
 top-level pulls deps for `manyrows-ui` and `appkit-ui` in one shot.
 `appkit-react` (the published customer SDK) is standalone — it's not
 part of the workspace and isn't needed to build or run the server;
-install its deps separately when working on it (see *Publishing the
-React SDK* below).
-
-### Publishing the React SDK
-
-Run from the repo root after bumping a version inside the package:
-
-```bash
-cd appkit-react
-npm install
-npm run build
-npm pack --dry-run                     # sanity-check what'll publish
-# npm version patch --no-git-tag-version
-npm publish --access public
-npm view @manyrows/appkit-react version
-```
+install its deps separately when working on it.
 
 ---
 
