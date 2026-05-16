@@ -13,6 +13,10 @@
 /slug.tgz
 /app/
 
+# Operator-private deploy scripts — kept locally, not shipped in the repo.
+/build.sh
+/deploy.sh
+
 # Embedded UI bundle — copied from manyrows-ui/dist at build time
 manyrows-core/web/*
 !manyrows-core/web/web.go
