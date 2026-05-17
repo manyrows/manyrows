@@ -25,7 +25,12 @@ services:
       retries: 10
 
   web:
-    build: .
+    build:
+      context: .
+      args:
+        # Stamped into the binary (shown in /health and the admin UI).
+        # Pass a real value: VERSION=$(git describe --tags --always --dirty) docker compose up -d --build
+        VERSION: ${VERSION:-dev}
     image: manyrows
     restart: unless-stopped
     depends_on:
