@@ -244,3 +244,49 @@ func TestAdminOIDCConfig_RegenerateAndClearMutuallyExclusive(t *testing.T) {
 		t.Fatalf("expected 400, got %d (body=%s)", rr.Code, rr.Body.String())
 	}
 }
+
+// TestAdminOIDCConfig_DisableAfterEnable proves the standard "turn it
+// off" path: an enabled+secret-configured app can be flipped back to
+// disabled, and the secret hash survives so re-enabling later does
+// not need a new client_secret roundtrip.
+func TestAdminOIDCConfig_DisableAfterEnable(t *testing.T) {
+	router := setupOIDCAdminRouter(t)
+	_, ws, project, appID, _, claims := createOIDCAppFixture(t)
+
+	// Enable with secret.
+	rr1 := putOIDCConfig(t, router, ws, project, appID, claims, map[string]any{
+		"enabled":          true,
+		"redirectUris":     []string{"https://customer.example/cb"},
+		"regenerateSecret": true,
+	})
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("enable: %d (body=%s)", rr1.Code, rr1.Body.String())
+	}
+
+	// Disable (no other changes).
+	rr2 := putOIDCConfig(t, router, ws, project, appID, claims, map[string]any{
+		"enabled": false,
+	})
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("disable: %d (body=%s)", rr2.Code, rr2.Body.String())
+	}
+	var disabled struct {
+		OIDCEnabled         bool     `json:"oidcEnabled"`
+		HasOIDCClientSecret bool     `json:"hasOIDCClientSecret"`
+		OIDCRedirectURIs    []string `json:"oidcRedirectUris"`
+	}
+	if err := json.Unmarshal(rr2.Body.Bytes(), &disabled); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if disabled.OIDCEnabled {
+		t.Fatalf("expected oidcEnabled=false after disable")
+	}
+	// Secret hash + URIs should survive — the admin can re-enable
+	// later without re-running secret distribution.
+	if !disabled.HasOIDCClientSecret {
+		t.Fatalf("client_secret hash should survive disable; HasOIDCClientSecret=false")
+	}
+	if len(disabled.OIDCRedirectURIs) != 1 || disabled.OIDCRedirectURIs[0] != "https://customer.example/cb" {
+		t.Fatalf("redirect URIs should survive disable, got %v", disabled.OIDCRedirectURIs)
+	}
+}

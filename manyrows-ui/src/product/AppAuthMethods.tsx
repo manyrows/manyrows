@@ -1916,27 +1916,42 @@ function OIDCProviderCard({ app, cardURL, onError, onSuccess }: CardProps) {
             <StatusChip size="xs" label={t("apps.oidc.publicClient", { defaultValue: "Public client (PKCE-only)" })} severity="warning" />
           )}
           <Box sx={{ flexGrow: 1 }} />
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => void regenerateSecret()}
-            disabled={saving}
-            sx={{ textTransform: "none" }}
+          {/* Regen + Clear are disabled while there are unsaved edits
+              above: each operation does its own PUT and would otherwise
+              silently discard the user's pending toggle / URI changes. */}
+          <Tooltip
+            title={dirty ? t("apps.oidc.saveChangesFirst", { defaultValue: "Save your pending changes first." }) : ""}
           >
-            {cfg.hasOIDCClientSecret
-              ? t("apps.oidc.rotateSecret", { defaultValue: "Rotate secret" })
-              : t("apps.oidc.generateSecret", { defaultValue: "Generate secret" })}
-          </Button>
+            <span>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => void regenerateSecret()}
+                disabled={saving || dirty}
+                sx={{ textTransform: "none" }}
+              >
+                {cfg.hasOIDCClientSecret
+                  ? t("apps.oidc.rotateSecret", { defaultValue: "Rotate secret" })
+                  : t("apps.oidc.generateSecret", { defaultValue: "Generate secret" })}
+              </Button>
+            </span>
+          </Tooltip>
           {cfg.hasOIDCClientSecret && (
-            <Button
-              size="small"
-              color="error"
-              onClick={() => setConfirmClearOpen(true)}
-              disabled={saving}
-              sx={{ textTransform: "none" }}
+            <Tooltip
+              title={dirty ? t("apps.oidc.saveChangesFirst", { defaultValue: "Save your pending changes first." }) : ""}
             >
-              {t("apps.oidc.downgradeToPublic", { defaultValue: "Clear (public)" })}
-            </Button>
+              <span>
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => setConfirmClearOpen(true)}
+                  disabled={saving || dirty}
+                  sx={{ textTransform: "none" }}
+                >
+                  {t("apps.oidc.downgradeToPublic", { defaultValue: "Clear (public)" })}
+                </Button>
+              </span>
+            </Tooltip>
           )}
         </Stack>
       </Section>
