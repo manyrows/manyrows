@@ -12,6 +12,11 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -28,7 +33,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { ChevronDown, Copy } from "lucide-react";
+import { ChevronDown, Copy, Plus, Trash2 } from "lucide-react";
 import Eyebrow from "../components/Eyebrow.tsx";
 import PageHeader from "../components/PageHeader.tsx";
 import Loader from "../Loader.tsx";
@@ -166,6 +171,7 @@ export default function AppAuthMethods({ project, appId }: Props) {
           <Tab label={t("apps.tab.email", { defaultValue: "Email" })} />
           <Tab label={t("apps.tab.oauth", { defaultValue: "OAuth" })} />
           <Tab label={t("apps.tab.passkeys", { defaultValue: "Passkeys" })} />
+          <Tab label={t("apps.tab.oidc", { defaultValue: "OIDC" })} />
         </Tabs>
       </Box>
 
@@ -190,6 +196,12 @@ export default function AppAuthMethods({ project, appId }: Props) {
         )}
         {tab === 3 && (
           <PasskeysCard appsBaseURL={appsBaseURL} appId={app.id} />
+        )}
+        {tab === 4 && (
+          <OIDCProviderCard
+            app={app} cardURL={cardURL}
+            onSaved={onSaved} onSuccess={onSuccess} onError={onError}
+          />
         )}
       </Box>
     </Box>
@@ -1640,5 +1652,451 @@ function CopyableUri(props: { label: string; uri: string; onCopy: () => void; he
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25, display: "block" }}>{props.help}</Typography>
     </Box>
+  );
+}
+
+// =====================================================================
+// OIDC Provider — ManyRows acts as an OpenID Connect IdP for this app.
+// Distinct from the OAuth tab (which sets up sign-in *with* Google/etc.
+// for end users); this tab exposes the app over standard OIDC so any
+// off-the-shelf OIDC library can integrate without the ManyRows SDK.
+// =====================================================================
+
+type OIDCConfigResponse = {
+  oidcEnabled: boolean;
+  hasOIDCClientSecret: boolean;
+  oidcClientSecret?: string; // present ONLY on regenerate
+  oidcClientId: string;
+  oidcIssuerUrl: string;
+  oidcDiscoveryUrl: string;
+  oidcRedirectUris: string[];
+  oidcPostLogoutRedirectUris: string[];
+};
+
+function OIDCProviderCard({ app, cardURL, onError, onSuccess }: CardProps) {
+  const { t } = useTranslation();
+  const { enqueueSnackbar } = useSnackbar();
+
+  const cookieMode = app.transportMode === "cookie";
+
+  const [loading, setLoading] = React.useState(true);
+  const [cfg, setCfg] = React.useState<OIDCConfigResponse | null>(null);
+  const [enabled, setEnabled] = React.useState(false);
+  const [redirects, setRedirects] = React.useState<string[]>([]);
+  const [postLogoutUris, setPostLogoutUris] = React.useState<string[]>([]);
+  const [newRedirect, setNewRedirect] = React.useState("");
+  const [newPostLogout, setNewPostLogout] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [revealedSecret, setRevealedSecret] = React.useState<string | null>(null);
+  const [confirmClearOpen, setConfirmClearOpen] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get<OIDCConfigResponse>(`${cardURL}/oidc-config`);
+      setCfg(res.data);
+      setEnabled(res.data.oidcEnabled);
+      setRedirects(res.data.oidcRedirectUris || []);
+      setPostLogoutUris(res.data.oidcPostLogoutRedirectUris || []);
+    } catch (e) {
+      onError(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [cardURL, onError]);
+
+  React.useEffect(() => { void load(); }, [load]);
+
+  const dirty = !!cfg && (
+    enabled !== cfg.oidcEnabled ||
+    redirects.join("|") !== (cfg.oidcRedirectUris || []).join("|") ||
+    postLogoutUris.join("|") !== (cfg.oidcPostLogoutRedirectUris || []).join("|")
+  );
+
+  async function copyToClipboard(text: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      enqueueSnackbar(t("apps.copied", { label }), { variant: "success" });
+    } catch {
+      enqueueSnackbar(t("apps.copyFailed", { defaultValue: "Copy failed" }), { variant: "error" });
+    }
+  }
+
+  function isValidHttpURL(s: string): boolean {
+    try {
+      const u = new URL(s);
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  function addRedirect() {
+    const v = newRedirect.trim();
+    if (!v) return;
+    if (!isValidHttpURL(v)) {
+      enqueueSnackbar(t("apps.oidc.invalidUri", { defaultValue: "Redirect URI must be a valid http(s) URL" }), { variant: "warning" });
+      return;
+    }
+    if (redirects.includes(v)) return;
+    setRedirects([...redirects, v]);
+    setNewRedirect("");
+  }
+
+  function addPostLogout() {
+    const v = newPostLogout.trim();
+    if (!v) return;
+    if (!isValidHttpURL(v)) {
+      enqueueSnackbar(t("apps.oidc.invalidUri", { defaultValue: "Redirect URI must be a valid http(s) URL" }), { variant: "warning" });
+      return;
+    }
+    if (postLogoutUris.includes(v)) return;
+    setPostLogoutUris([...postLogoutUris, v]);
+    setNewPostLogout("");
+  }
+
+  async function saveConfig() {
+    if (!cfg) return;
+    if (enabled && redirects.length === 0) {
+      onError(new Error(t("apps.oidc.redirectUrisRequired", { defaultValue: "Add at least one Redirect URI before enabling OIDC." })));
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await axios.put<OIDCConfigResponse>(`${cardURL}/oidc-config`, {
+        enabled,
+        redirectUris: redirects,
+        postLogoutRedirectUris: postLogoutUris,
+      });
+      setCfg(res.data);
+      setEnabled(res.data.oidcEnabled);
+      setRedirects(res.data.oidcRedirectUris || []);
+      setPostLogoutUris(res.data.oidcPostLogoutRedirectUris || []);
+      onSuccess();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function regenerateSecret() {
+    setSaving(true);
+    try {
+      const res = await axios.put<OIDCConfigResponse>(`${cardURL}/oidc-config`, {
+        regenerateSecret: true,
+      });
+      setCfg(res.data);
+      if (res.data.oidcClientSecret) {
+        setRevealedSecret(res.data.oidcClientSecret);
+      }
+      onSuccess();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function clearSecret() {
+    setConfirmClearOpen(false);
+    setSaving(true);
+    try {
+      const res = await axios.put<OIDCConfigResponse>(`${cardURL}/oidc-config`, {
+        clearSecret: true,
+      });
+      setCfg(res.data);
+      onSuccess();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function resetFromCfg() {
+    if (!cfg) return;
+    setEnabled(cfg.oidcEnabled);
+    setRedirects(cfg.oidcRedirectUris || []);
+    setPostLogoutUris(cfg.oidcPostLogoutRedirectUris || []);
+    setNewRedirect("");
+    setNewPostLogout("");
+  }
+
+  if (loading || !cfg) return <Loader />;
+
+  return (
+    <Stack
+      divider={<Box sx={{ height: "1px", bgcolor: "divider", my: 1 }} />}
+      spacing={3.5}
+      sx={{ maxWidth: 680 }}
+    >
+      <Section
+        overline={t("apps.sectionOverline.oidcProvider", { defaultValue: "OIDC provider" })}
+        title={t("apps.oidc.title", { defaultValue: "OpenID Connect provider" })}
+        desc={t("apps.oidc.desc", {
+          defaultValue:
+            "Expose this app over standard OpenID Connect so any off-the-shelf OIDC client library (next-auth, passport-openidconnect, Spring Security, etc.) can authenticate users without the ManyRows SDK. Coexists with the SDK path — both work in parallel.",
+        })}
+      >
+        {!cookieMode && (
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            {t("apps.oidc.cookieModeRequired", {
+              defaultValue:
+                "OIDC requires Cookie transport mode. Switch this app's transport mode in the General tab before enabling.",
+            })}
+          </Alert>
+        )}
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              disabled={saving || !cookieMode}
+            />
+          }
+          label={
+            <Stack spacing={0}>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {t("apps.oidc.enableLabel", { defaultValue: "Enable OIDC provider for this app" })}
+              </Typography>
+              {enabled && redirects.length === 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  {t("apps.oidc.redirectUrisRequiredHint", { defaultValue: "Add at least one Redirect URI before saving." })}
+                </Typography>
+              )}
+            </Stack>
+          }
+          sx={{ ml: 0 }}
+        />
+      </Section>
+
+      <Section
+        overline={t("apps.sectionOverline.endpoints", { defaultValue: "Endpoints" })}
+        title={t("apps.oidc.endpointsTitle", { defaultValue: "Integration endpoints" })}
+        desc={t("apps.oidc.endpointsDesc", {
+          defaultValue: "Paste these into your OIDC client library configuration.",
+        })}
+      >
+        <CopyableUri
+          label={t("apps.oidc.discoveryUrl", { defaultValue: "Discovery URL" })}
+          uri={cfg.oidcDiscoveryUrl}
+          onCopy={() => copyToClipboard(cfg.oidcDiscoveryUrl, "Discovery URL")}
+          help={t("apps.oidc.discoveryUrlHelp", { defaultValue: "Most OIDC libraries take this single URL and self-configure." })}
+          copyTitle={t("apps.copyDiscoveryUrl", { defaultValue: "Copy discovery URL" })}
+        />
+        <CopyableUri
+          label={t("apps.oidc.issuerUrl", { defaultValue: "Issuer URL" })}
+          uri={cfg.oidcIssuerUrl}
+          onCopy={() => copyToClipboard(cfg.oidcIssuerUrl, "Issuer URL")}
+          help={t("apps.oidc.issuerUrlHelp", { defaultValue: "The iss claim on issued id_tokens. Matches the discovery doc's issuer field." })}
+          copyTitle={t("apps.copyIssuerUrl", { defaultValue: "Copy issuer URL" })}
+        />
+        <CopyableUri
+          label={t("apps.oidc.clientId", { defaultValue: "Client ID" })}
+          uri={cfg.oidcClientId}
+          onCopy={() => copyToClipboard(cfg.oidcClientId, "Client ID")}
+          help={t("apps.oidc.clientIdHelp", { defaultValue: "Stable per app. Send as client_id at /authorize and /token." })}
+          copyTitle={t("apps.copyClientId", { defaultValue: "Copy client ID" })}
+        />
+      </Section>
+
+      <Section
+        overline={t("apps.sectionOverline.clientSecret", { defaultValue: "Client secret" })}
+        title={t("apps.oidc.clientSecretTitle", { defaultValue: "Client secret" })}
+        desc={t("apps.oidc.clientSecretDesc", {
+          defaultValue: "Confidential clients (backend code) authenticate at /token with a secret. Public clients (browser/mobile, PKCE-only) leave the secret empty.",
+        })}
+      >
+        <Stack direction="row" alignItems="center" spacing={1}>
+          {cfg.hasOIDCClientSecret ? (
+            <StatusChip size="xs" label={t("apps.oidc.secretConfigured", { defaultValue: "Configured" })} severity="success" />
+          ) : (
+            <StatusChip size="xs" label={t("apps.oidc.publicClient", { defaultValue: "Public client (PKCE-only)" })} severity="warning" />
+          )}
+          <Box sx={{ flexGrow: 1 }} />
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => void regenerateSecret()}
+            disabled={saving}
+            sx={{ textTransform: "none" }}
+          >
+            {cfg.hasOIDCClientSecret
+              ? t("apps.oidc.rotateSecret", { defaultValue: "Rotate secret" })
+              : t("apps.oidc.generateSecret", { defaultValue: "Generate secret" })}
+          </Button>
+          {cfg.hasOIDCClientSecret && (
+            <Button
+              size="small"
+              color="error"
+              onClick={() => setConfirmClearOpen(true)}
+              disabled={saving}
+              sx={{ textTransform: "none" }}
+            >
+              {t("apps.oidc.downgradeToPublic", { defaultValue: "Clear (public)" })}
+            </Button>
+          )}
+        </Stack>
+      </Section>
+
+      <Section
+        overline={t("apps.sectionOverline.redirectUris", { defaultValue: "Redirect URIs" })}
+        title={t("apps.oidc.redirectUrisTitle", { defaultValue: "Redirect URIs" })}
+        desc={t("apps.oidc.redirectUrisDesc", {
+          defaultValue: "Exact-match allowlist. The RP's redirect_uri at /authorize must match one of these exactly.",
+        })}
+      >
+        <UriListEditor
+          uris={redirects}
+          newUri={newRedirect}
+          setNewUri={setNewRedirect}
+          onAdd={addRedirect}
+          onRemove={(u) => setRedirects(redirects.filter((x) => x !== u))}
+          placeholder="https://customer-app.example.com/oidc/callback"
+          disabled={saving}
+        />
+      </Section>
+
+      <Section
+        overline={t("apps.sectionOverline.postLogoutUris", { defaultValue: "Post-logout redirect URIs" })}
+        title={t("apps.oidc.postLogoutTitle", { defaultValue: "Post-logout redirect URIs" })}
+        desc={t("apps.oidc.postLogoutDesc", {
+          defaultValue: "Optional. Exact-match allowlist for post_logout_redirect_uri on /oidc/end-session.",
+        })}
+      >
+        <UriListEditor
+          uris={postLogoutUris}
+          newUri={newPostLogout}
+          setNewUri={setNewPostLogout}
+          onAdd={addPostLogout}
+          onRemove={(u) => setPostLogoutUris(postLogoutUris.filter((x) => x !== u))}
+          placeholder="https://customer-app.example.com/signed-out"
+          disabled={saving}
+        />
+      </Section>
+
+      <SaveBar dirty={dirty} saving={saving} onSave={() => void saveConfig()} onDiscard={resetFromCfg} />
+
+      {/* Show-once secret dialog */}
+      <Dialog open={revealedSecret !== null} onClose={() => setRevealedSecret(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>{t("apps.oidc.secretRevealedTitle", { defaultValue: "Client secret generated" })}</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            {t("apps.oidc.secretRevealedDesc", {
+              defaultValue:
+                "Copy this secret and store it somewhere safe. It will NEVER be shown again — only its hash is kept. If you lose it, generate a new one (which invalidates this one).",
+            })}
+          </DialogContentText>
+          <TextField
+            fullWidth
+            multiline
+            value={revealedSecret || ""}
+            InputProps={{ readOnly: true, sx: { fontFamily: "var(--font-mono)", fontSize: 13 } }}
+            onFocus={(e) => e.target.select()}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              if (revealedSecret) void copyToClipboard(revealedSecret, "Client secret");
+            }}
+            startIcon={<Copy size={14} strokeWidth={1.75} />}
+          >
+            {t("apps.copy", { defaultValue: "Copy" })}
+          </Button>
+          <Button onClick={() => setRevealedSecret(null)} variant="contained">
+            {t("apps.oidc.secretRevealedDone", { defaultValue: "I've saved it" })}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm-clear secret dialog */}
+      <Dialog open={confirmClearOpen} onClose={() => setConfirmClearOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{t("apps.oidc.clearConfirmTitle", { defaultValue: "Downgrade to public client?" })}</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {t("apps.oidc.clearConfirmDesc", {
+              defaultValue:
+                "Clearing the secret turns this app into a public client (PKCE-only). Existing integrations that send a client_secret at /token will fail until reconfigured.",
+            })}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmClearOpen(false)}>{t("cancel", { defaultValue: "Cancel" })}</Button>
+          <Button onClick={() => void clearSecret()} color="error" variant="contained">
+            {t("apps.oidc.clearConfirmAction", { defaultValue: "Clear secret" })}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Stack>
+  );
+}
+
+// UriListEditor — shared list-editor for redirect_uris + post_logout_uris.
+function UriListEditor({
+  uris,
+  newUri,
+  setNewUri,
+  onAdd,
+  onRemove,
+  placeholder,
+  disabled,
+}: {
+  uris: string[];
+  newUri: string;
+  setNewUri: (v: string) => void;
+  onAdd: () => void;
+  onRemove: (u: string) => void;
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Stack direction="row" spacing={1}>
+        <TextField
+          size="small"
+          fullWidth
+          value={newUri}
+          onChange={(e) => setNewUri(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onAdd();
+            }
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+        <Button onClick={onAdd} disabled={disabled || newUri.trim() === ""} startIcon={<Plus size={14} strokeWidth={1.75} />} sx={{ textTransform: "none", whiteSpace: "nowrap" }}>
+          Add
+        </Button>
+      </Stack>
+      {uris.length === 0 ? (
+        <Typography variant="caption" color="text.disabled">
+          None configured.
+        </Typography>
+      ) : (
+        <Stack spacing={0.75}>
+          {uris.map((u) => (
+            <Stack key={u} direction="row" alignItems="center" spacing={1} sx={{
+              p: 1,
+              borderRadius: 1,
+              bgcolor: "action.hover",
+            }}>
+              <Typography sx={{ fontFamily: "var(--font-mono)", fontSize: 12.5, flexGrow: 1, wordBreak: "break-all" }}>
+                {u}
+              </Typography>
+              <Tooltip title="Remove">
+                <IconButton size="small" onClick={() => onRemove(u)} disabled={disabled}>
+                  <Trash2 size={14} strokeWidth={1.75} />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </Stack>
   );
 }
