@@ -284,6 +284,8 @@ func (a *AppService) initRouter() error {
 			r.Put("/apple-config", requestHandler.HandleUpdateAppAppleConfig)
 			r.Put("/microsoft-config", requestHandler.HandleUpdateAppMicrosoftConfig)
 			r.Put("/github-config", requestHandler.HandleUpdateAppGithubConfig)
+			r.Get("/oidc-config", requestHandler.HandleGetAppOIDCConfig)
+			r.Put("/oidc-config", requestHandler.HandleUpdateAppOIDCConfig)
 			r.Put("/password-policy", requestHandler.HandleUpdateAppPasswordPolicy)
 			r.Put("/cookie-domain", requestHandler.HandleUpdateAppCookieDomain)
 			r.Put("/transport-mode", requestHandler.HandleUpdateAppTransportMode)
