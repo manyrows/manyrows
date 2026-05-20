@@ -44,13 +44,3 @@ type CrossDevicePairing struct {
 	ApprovedAt         *time.Time
 	ConsumedAt         *time.Time
 }
-
-// IsApprovedAndAvailable reports whether the desktop's /wait poll
-// should consume this row and mint tokens. Both expired and
-// already-consumed rows fall through to the terminal-410 branch.
-func (p *CrossDevicePairing) IsApprovedAndAvailable(now time.Time) bool {
-	return p != nil &&
-		p.Status == CrossDevicePairingStatusApproved &&
-		p.ConsumedAt == nil &&
-		!now.After(p.ExpiresAt)
-}

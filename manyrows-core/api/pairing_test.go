@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"manyrows-core/api"
@@ -242,12 +243,27 @@ func TestPair_HappyPath_StartApproveWaitMintsTokens(t *testing.T) {
 		t.Fatalf("expires_in should be positive, got %d", pair.ExpiresIn)
 	}
 
-	// Verify the JWT's subject is the approver's user_id.
+	// Decode the JWT payload and assert sub matches the approver's
+	// user_id. Catches the "tokens minted for wrong user" class of
+	// bug — purely structural checks (parts == 3) wouldn't.
 	parts := strings.Split(pair.AccessToken, ".")
 	if len(parts) != 3 {
 		t.Fatalf("access token not a JWT: %q", pair.AccessToken)
 	}
-	_ = userID // The session is bound to userID; access-token sub is the source of truth.
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode JWT payload: %v", err)
+	}
+	var claims struct {
+		Sub string `json:"sub"`
+		Aud any    `json:"aud"`
+	}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		t.Fatalf("unmarshal JWT claims: %v", err)
+	}
+	if claims.Sub != userID.String() {
+		t.Fatalf("JWT sub should be approver user_id %q, got %q", userID.String(), claims.Sub)
+	}
 }
 
 func TestPair_DoubleConsumeReturns410(t *testing.T) {
