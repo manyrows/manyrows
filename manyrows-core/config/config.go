@@ -153,6 +153,14 @@ func (conf *Config) GetAuthLogRetentionDays() int {
 	return envIntOrZero(conf.envPrefix + "AUTH_LOG_RETENTION_DAYS")
 }
 
+// GetAPIRateLimitPerMinute returns the per-key request budget for the
+// server-to-server API. Zero / unset = limiter default (1200/min). Raise
+// it for high-throughput integrations; lower it to tighten the blast
+// radius of a leaked key.
+func (conf *Config) GetAPIRateLimitPerMinute() int {
+	return envIntOrZero(conf.envPrefix + "API_RATE_PER_MINUTE")
+}
+
 // envIntOrZero parses a non-negative integer env var. Returns 0 on any
 // failure so the caller's "0 = default" semantics aren't broken by a
 // typo in the env file.

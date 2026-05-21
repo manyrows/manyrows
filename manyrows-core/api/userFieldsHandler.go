@@ -399,6 +399,87 @@ func (handler *RequestHandler) HandleGetUserFieldValues(w http.ResponseWriter, r
 	utils.WriteJsonWithStatusCode(w, UserFieldValuesResponse{Values: values}, http.StatusOK)
 }
 
+// upsertUserFieldValueScoped loads the field (which must belong to poolID),
+// gates the target user to the same pool, validates the request body against
+// the field's type, and upserts the value attributed to actorID. It writes
+// the HTTP response itself. Shared by the admin and server APIs, which differ
+// only in how they resolve poolID and actorID.
+func (handler *RequestHandler) upsertUserFieldValueScoped(w http.ResponseWriter, r *http.Request, poolID, fieldID, userID, actorID uuid.UUID) {
+	field, err := handler.repo.GetUserFieldByID(r.Context(), poolID, fieldID)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			WriteError(w, r, "error.notFound", http.StatusNotFound)
+			return
+		}
+		log.Err(err).Msg("upsertUserFieldValueScoped: failed to get field")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+
+	user, err := handler.repo.GetUserByID(r.Context(), userID)
+	if err != nil || user == nil || user.UserPoolID != poolID {
+		WriteError(w, r, "error.notFound", http.StatusNotFound)
+		return
+	}
+
+	var req UpsertUserFieldValueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, r, "error.invalidJson", http.StatusBadRequest)
+		return
+	}
+	if msg := core.ValidateFieldValue(field.ValueType, req.Value); msg != "" {
+		WriteErrorMsg(w, r, msg, http.StatusBadRequest)
+		return
+	}
+
+	out, err := handler.repo.UpsertUserFieldValue(r.Context(), core.UserFieldValue{
+		ID:          utils.NewUUID(),
+		UserID:      userID,
+		UserFieldID: fieldID,
+		UpdatedAt:   time.Now().UTC(),
+		UpdatedBy:   actorID,
+	}, req.Value)
+	if err != nil {
+		log.Err(err).Msg("upsertUserFieldValueScoped: upsert failed")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+
+	utils.WriteJsonWithStatusCode(w, UserFieldValueResponse{Value: out}, http.StatusOK)
+}
+
+// deleteUserFieldValueScoped clears a user's value for a field after gating
+// both the field and the user to poolID. It writes the HTTP response itself.
+func (handler *RequestHandler) deleteUserFieldValueScoped(w http.ResponseWriter, r *http.Request, poolID, fieldID, userID uuid.UUID) {
+	if _, err := handler.repo.GetUserFieldByID(r.Context(), poolID, fieldID); err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			WriteError(w, r, "error.notFound", http.StatusNotFound)
+			return
+		}
+		log.Err(err).Msg("deleteUserFieldValueScoped: failed to load field")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+
+	user, err := handler.repo.GetUserByID(r.Context(), userID)
+	if err != nil || user == nil || user.UserPoolID != poolID {
+		WriteError(w, r, "error.notFound", http.StatusNotFound)
+		return
+	}
+
+	if err := handler.repo.DeleteUserFieldValue(r.Context(), fieldID, userID); err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			WriteError(w, r, "error.notFound", http.StatusNotFound)
+			return
+		}
+		log.Err(err).Msg("deleteUserFieldValueScoped: delete failed")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (handler *RequestHandler) HandleUpsertUserFieldValue(w http.ResponseWriter, r *http.Request) {
 	acc, _, pool, ok := handler.adminAndPool(w, r)
 	if !ok {
@@ -410,61 +491,13 @@ func (handler *RequestHandler) HandleUpsertUserFieldValue(w http.ResponseWriter,
 		WriteError(w, r, "error.badRequest", http.StatusBadRequest)
 		return
 	}
-
 	userID, err := uuid.FromString(chi.URLParam(r, "userId"))
 	if err != nil {
 		WriteError(w, r, "error.badRequest", http.StatusBadRequest)
 		return
 	}
 
-	// Validate field exists and belongs to this pool.
-	field, err := handler.repo.GetUserFieldByID(r.Context(), pool.ID, fieldID)
-	if err != nil {
-		if errors.Is(err, repo.ErrNotFound) {
-			WriteError(w, r, "error.notFound", http.StatusNotFound)
-			return
-		}
-		log.Err(err).Msg("HandleUpsertUserFieldValue: failed to get field")
-		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
-		return
-	}
-
-	// Confirm the user lives in this pool too.
-	user, err := handler.repo.GetUserByID(r.Context(), userID)
-	if err != nil || user == nil || user.UserPoolID != pool.ID {
-		WriteError(w, r, "error.notFound", http.StatusNotFound)
-		return
-	}
-
-	var req UpsertUserFieldValueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, r, "error.invalidJson", http.StatusBadRequest)
-		return
-	}
-
-	if msg := core.ValidateFieldValue(field.ValueType, req.Value); msg != "" {
-		WriteErrorMsg(w, r, msg, http.StatusBadRequest)
-		return
-	}
-
-	now := time.Now().UTC()
-
-	v := core.UserFieldValue{
-		ID:          utils.NewUUID(),
-		UserID:      userID,
-		UserFieldID: fieldID,
-		UpdatedAt:   now,
-		UpdatedBy:   acc.ID,
-	}
-
-	out, err := handler.repo.UpsertUserFieldValue(r.Context(), v, req.Value)
-	if err != nil {
-		log.Err(err).Msg("HandleUpsertUserFieldValue: failed")
-		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
-		return
-	}
-
-	utils.WriteJsonWithStatusCode(w, UserFieldValueResponse{Value: out}, http.StatusOK)
+	handler.upsertUserFieldValueScoped(w, r, pool.ID, fieldID, userID, acc.ID)
 }
 
 func (handler *RequestHandler) HandleDeleteUserFieldValue(w http.ResponseWriter, r *http.Request) {
@@ -478,38 +511,11 @@ func (handler *RequestHandler) HandleDeleteUserFieldValue(w http.ResponseWriter,
 		WriteError(w, r, "error.badRequest", http.StatusBadRequest)
 		return
 	}
-
 	userID, err := uuid.FromString(chi.URLParam(r, "userId"))
 	if err != nil {
 		WriteError(w, r, "error.badRequest", http.StatusBadRequest)
 		return
 	}
 
-	// Belongs-to-pool gates: both field and user.
-	if _, err := handler.repo.GetUserFieldByID(r.Context(), pool.ID, fieldID); err != nil {
-		if errors.Is(err, repo.ErrNotFound) {
-			WriteError(w, r, "error.notFound", http.StatusNotFound)
-			return
-		}
-		log.Err(err).Msg("HandleDeleteUserFieldValue: failed to load field")
-		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
-		return
-	}
-	user, err := handler.repo.GetUserByID(r.Context(), userID)
-	if err != nil || user == nil || user.UserPoolID != pool.ID {
-		WriteError(w, r, "error.notFound", http.StatusNotFound)
-		return
-	}
-
-	if err := handler.repo.DeleteUserFieldValue(r.Context(), fieldID, userID); err != nil {
-		if errors.Is(err, repo.ErrNotFound) {
-			WriteError(w, r, "error.notFound", http.StatusNotFound)
-			return
-		}
-		log.Err(err).Msg("HandleDeleteUserFieldValue: failed")
-		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	handler.deleteUserFieldValueScoped(w, r, pool.ID, fieldID, userID)
 }

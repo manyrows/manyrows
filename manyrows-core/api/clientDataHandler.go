@@ -403,7 +403,7 @@ func (handler *RequestHandler) CheckPermission(w http.ResponseWriter, r *http.Re
 }
 
 // ServerCheckPermission checks whether a specific user has a permission.
-// GET /x/{workspaceSlug}/api/apps/{appId}/check-permission?accountId=<uuid>&permission=posts:read
+// GET /x/{workspaceSlug}/api/v1/apps/{appId}/check-permission?accountId=<uuid>&permission=posts:read
 //
 // This is the server-to-server equivalent of CheckPermission. Instead of using the
 // caller's JWT session, the caller specifies which user to check via query param.
@@ -442,21 +442,8 @@ func (handler *RequestHandler) ServerCheckPermission(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Verify the user is a member of the calling app. Without this check
-	// the response leaks user existence across apps: 404 = "no such user
-	// anywhere," 200 = "user exists in some app on this install." The
-	// caller is the app's server-to-server client, so it should only
-	// learn about its own members. Pool-level existence is fine to share
-	// across apps in the same pool (that's the SSO contract), but
-	// membership is per-app.
-	member, err := handler.repo.GetAppUser(ctx, app.ID, accountID)
-	if err != nil {
-		log.Err(err).Msg("Could not get app member for server check-permission")
-		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
-		return
-	}
-	if member == nil {
-		WriteError(w, r, "error.notFound", http.StatusNotFound)
+	// Only answer for members of the calling app (see requireAppMember).
+	if !handler.requireAppMember(w, r, app.ID, accountID) {
 		return
 	}
 

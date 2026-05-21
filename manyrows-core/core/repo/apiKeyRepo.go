@@ -82,7 +82,8 @@ func (r *Repo) GetAPIKey(
 			prefix,
 			hash,
 			created_at,
-			created_by
+			created_by,
+			last_used_at
 		from api_keys
 		where id = $1
 		  and workspace_id = $2
@@ -111,7 +112,8 @@ func (r *Repo) GetAPIKeys(
 			prefix,
 			hash,
 			created_at,
-			created_by
+			created_by,
+			last_used_at
 		from api_keys
 		where workspace_id = $1
 		order by created_at desc
@@ -149,7 +151,8 @@ func (r *Repo) GetAPIKeysForApp(
 			prefix,
 			hash,
 			created_at,
-			created_by
+			created_by,
+			last_used_at
 		from api_keys
 		where workspace_id = $1
 		  and app_id = $2
@@ -206,6 +209,7 @@ func scanAPIKey(s apiKeyScanner, key *core.APIKey) error {
 		&key.Hash,
 		&key.CreatedAt,
 		&key.CreatedBy,
+		&key.LastUsedAt,
 	)
 }
 
@@ -238,7 +242,8 @@ func (r *Repo) GetAPIKeyByPrefix(
       prefix,
       hash,
       created_at,
-      created_by
+      created_by,
+      last_used_at
     from api_keys
     where workspace_id = $1
       and prefix = $2
@@ -256,4 +261,20 @@ func (r *Repo) GetAPIKeyByPrefix(
 	}
 
 	return &key, true, nil
+}
+
+// TouchAPIKeyLastUsed records that a key was just used. The WHERE clause
+// throttles writes to at most once per minute per key, so a hot key under
+// heavy traffic doesn't generate a row update on every request. Best-effort:
+// callers should log and ignore errors rather than failing the request.
+func (r *Repo) TouchAPIKeyLastUsed(ctx context.Context, keyID uuid.UUID) error {
+	const q = `
+		update api_keys
+		set last_used_at = now()
+		where id = $1
+		  and (last_used_at is null or last_used_at < now() - interval '1 minute')
+	`
+
+	_, err := r.db.Pool().Exec(ctx, q, keyID)
+	return err
 }

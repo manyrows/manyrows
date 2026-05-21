@@ -17,4 +17,9 @@ type APIKey struct {
 
 	CreatedAt time.Time `json:"createdAt"`
 	CreatedBy uuid.UUID `json:"createdBy"`
+
+	// LastUsedAt is the approximate time the key was last presented to the
+	// server API. Nil if it has never been used. Updated best-effort, so it
+	// can lag slightly behind the most recent request.
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 }

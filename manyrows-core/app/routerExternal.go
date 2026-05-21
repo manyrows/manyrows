@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -133,13 +134,25 @@ func (a *AppService) externalAPIRouter(h *api.RequestHandler, corsMiddleware fun
 // =====================
 // SERVER ROUTER (server-to-server)
 // Mounted at: /x/{workspaceSlug}/api
+// Endpoints live under a /v1 version segment, so the full base is
+// /x/{workspaceSlug}/api/v1/apps/{appId}. Bump to /v2 (mounted alongside
+// /v1) for a future breaking change rather than mutating /v1 in place.
 // NOTE: do NOT mount "/api" again inside here, or you'll get /api/api.
 // =====================
 func (a *AppService) serverAPIRouter(h *api.RequestHandler) *chi.Mux {
 	r := chi.NewRouter()
 
+	// Outermost: one structured audit line per request, including auth
+	// failures and throttled requests (which never reach a handler).
+	r.Use(serverAccessLogMiddleware())
+
 	r.Use(workspaceMiddleware(a.repo))
-	r.Use(apiKeyMiddleware(a.repo))
+	r.Use(apiKeyMiddleware(a.repo, newLastUsedThrottle(time.Minute)))
+
+	// Per-key throttle, after auth so the key is in context. Created once
+	// here (serverAPIRouter is built a single time at startup) so the
+	// token buckets persist for the process lifetime.
+	r.Use(apiKeyRateLimitMiddleware(newAPIKeyRateLimiter(a.config.GetAPIRateLimitPerMinute())))
 
 	// App-scoped routes (resolves project+env from app, then CORS/IP)
 	appRouter := chi.NewRouter()
@@ -149,13 +162,21 @@ func (a *AppService) serverAPIRouter(h *api.RequestHandler) *chi.Mux {
 	appRouter.Get("/check-permission", h.ServerCheckPermission)
 	appRouter.Get("/members", h.ServerGetAppMembers)
 
-	// User fields (read-only, app-scoped)
+	// User fields (app-scoped). Schema is read-only; values can be read
+	// and written per user (handlers pool-scope every userId).
 	appRouter.Get("/user-fields", h.HandleServerGetUserFields)
+	appRouter.Get("/user-fields/users/{userId}", h.HandleServerGetUserFieldValues)
+	appRouter.Put("/user-fields/{userFieldId}/users/{userId}", h.ServerUpsertUserFieldValue)
+	appRouter.Delete("/user-fields/{userFieldId}/users/{userId}", h.ServerDeleteUserFieldValue)
 
 	// User lookup
 	appRouter.Get("/users", h.HandleServerGetUser)
 
-	r.Mount("/apps/{appId}", appRouter)
+	// User mutations (force-logout, role assignment), app/pool-scoped.
+	appRouter.Delete("/users/{userId}/sessions", h.ServerRevokeUserSessions)
+	appRouter.Put("/users/{userId}/roles", h.ServerReplaceUserRoles)
+
+	r.Mount("/v1/apps/{appId}", appRouter)
 
 	return r
 }
@@ -171,13 +192,16 @@ func (a *AppService) serverAPIRouter(h *api.RequestHandler) *chi.Mux {
 // Header:
 // - Prefer: X-API-Key: <fullKey>
 // - Also allow: Authorization: Bearer <fullKey>
-func apiKeyMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
+func apiKeyMiddleware(rpo *repo.Repo, touch *lastUsedThrottle) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ws, ok := core.WorkspaceFromContext(r.Context())
 			if !ok || ws == nil {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 				return
+			}
+			if f := serverAccessLogFieldsFrom(r.Context()); f != nil {
+				f.workspaceID = ws.ID.String()
 			}
 
 			raw := strings.TrimSpace(r.Header.Get("X-API-Key"))
@@ -188,13 +212,13 @@ func apiKeyMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 				}
 			}
 			if raw == "" {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 				return
 			}
 
 			prefix, ok := parseAPIKeyPrefix(raw)
 			if !ok {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -202,11 +226,11 @@ func apiKeyMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 			key, found, err := rpo.GetAPIKeyByPrefix(r.Context(), ws.ID, prefix)
 			if err != nil {
 				log.Err(err).Msg("apiKeyMiddleware: GetAPIKeyByPrefix failed")
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				api.WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 				return
 			}
 			if !found || key == nil {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -216,7 +240,7 @@ func apiKeyMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 
 			// Constant-time compare
 			if subtle.ConstantTimeCompare([]byte(key.Hash), []byte(presented)) != 1 {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -226,10 +250,30 @@ func apiKeyMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 				if reqAppIDStr != "" {
 					reqAppID, parseErr := uuid.FromString(reqAppIDStr)
 					if parseErr != nil || *key.AppID != reqAppID {
-						http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+						api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 						return
 					}
 				}
+			}
+
+			if f := serverAccessLogFieldsFrom(r.Context()); f != nil {
+				f.apiKeyID = key.ID.String()
+				f.apiKeyName = key.Name
+			}
+
+			// Record last use without blocking the request. The in-memory
+			// throttle keeps this off the DB on the hot path (once per
+			// interval per key); the repo's WHERE clause is the
+			// multi-process backstop. Detached context so it outlives the
+			// request.
+			if touch.shouldWrite(key.ID) {
+				go func(id uuid.UUID) {
+					bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := rpo.TouchAPIKeyLastUsed(bgCtx, id); err != nil {
+						log.Err(err).Msg("apiKeyMiddleware: TouchAPIKeyLastUsed failed")
+					}
+				}(key.ID)
 			}
 
 			// Attach for handlers/auth logging
@@ -356,17 +400,17 @@ func workspaceMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 
 			workspaceSlug := utils.GetPathString("workspaceSlug", r)
 			if workspaceSlug == "" {
-				http.Error(w, "missing workspace slug", http.StatusBadRequest)
+				api.WriteError(w, r, "error.missingWorkspaceSlug", http.StatusBadRequest)
 				return
 			}
 
 			ws, ok, err := rpo.GetWorkspaceBySlug(ctx, workspaceSlug)
 			if err != nil {
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				api.WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 				return
 			}
 			if !ok {
-				http.Error(w, "workspace not found", http.StatusForbidden)
+				api.WriteError(w, r, "error.workspaceNotFound", http.StatusForbidden)
 				return
 			}
 
@@ -387,7 +431,7 @@ func appFromURLMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 
 			ws, ok := core.WorkspaceFromContext(ctx)
 			if !ok || ws == nil {
-				http.Error(w, "invalid workspace", http.StatusUnauthorized)
+				api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -395,11 +439,11 @@ func appFromURLMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 			app, appOk := core.AppFromContext(ctx)
 			if appOk && app != nil {
 				if app.WorkspaceID != ws.ID {
-					http.Error(w, "app not found", http.StatusForbidden)
+					api.WriteError(w, r, "error.appNotFound", http.StatusForbidden)
 					return
 				}
 				if !app.Enabled {
-					http.Error(w, "app is disabled", http.StatusForbidden)
+					api.WriteError(w, r, "error.appDisabled", http.StatusForbidden)
 					return
 				}
 				next.ServeHTTP(w, r)
@@ -409,27 +453,27 @@ func appFromURLMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 			// Full resolution for non-browser requests (CORS middleware skipped).
 			appID, err := utils.GetPathUUID("appId", r)
 			if err != nil {
-				http.Error(w, "invalid app id", http.StatusBadRequest)
+				api.WriteError(w, r, "error.invalidAppId", http.StatusBadRequest)
 				return
 			}
 
 			loaded, err := rpo.GetAppByID(ctx, appID)
 			if err != nil {
 				if errors.Is(err, repo.ErrNotFound) {
-					http.Error(w, "app not found", http.StatusForbidden)
+					api.WriteError(w, r, "error.appNotFound", http.StatusForbidden)
 					return
 				}
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				api.WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 				return
 			}
 
 			if loaded.WorkspaceID != ws.ID {
-				http.Error(w, "app not found", http.StatusForbidden)
+				api.WriteError(w, r, "error.appNotFound", http.StatusForbidden)
 				return
 			}
 
 			if !loaded.Enabled {
-				http.Error(w, "app is disabled", http.StatusForbidden)
+				api.WriteError(w, r, "error.appDisabled", http.StatusForbidden)
 				return
 			}
 
@@ -448,7 +492,7 @@ func appMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 
 			ws, ok := core.WorkspaceFromContext(ctx)
 			if !ok || ws == nil {
-				http.Error(w, "invalid workspace", http.StatusUnauthorized)
+				api.WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -458,27 +502,27 @@ func appMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 				// Fallback: resolve from URL (for server API routes that don't use appFromURLMiddleware)
 				appID, err := utils.GetPathUUID("appId", r)
 				if err != nil {
-					http.Error(w, "invalid app id", http.StatusBadRequest)
+					api.WriteError(w, r, "error.invalidAppId", http.StatusBadRequest)
 					return
 				}
 
 				loaded, err := rpo.GetAppByID(ctx, appID)
 				if err != nil {
 					if errors.Is(err, repo.ErrNotFound) {
-						http.Error(w, "app not found", http.StatusForbidden)
+						api.WriteError(w, r, "error.appNotFound", http.StatusForbidden)
 						return
 					}
-					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					api.WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 					return
 				}
 
 				if loaded.WorkspaceID != ws.ID {
-					http.Error(w, "app not found", http.StatusForbidden)
+					api.WriteError(w, r, "error.appNotFound", http.StatusForbidden)
 					return
 				}
 
 				if !loaded.Enabled {
-					http.Error(w, "app is disabled", http.StatusForbidden)
+					api.WriteError(w, r, "error.appDisabled", http.StatusForbidden)
 					return
 				}
 
@@ -489,15 +533,19 @@ func appMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handler {
 			// Load project
 			project, err := rpo.GetProduct(ctx, app.ProductID, ws.ID)
 			if err != nil {
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				api.WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 				return
 			}
 			if project == nil {
-				http.Error(w, "project not found", http.StatusForbidden)
+				api.WriteError(w, r, "error.projectNotFound", http.StatusForbidden)
 				return
 			}
 
 			ctx = core.WithProduct(ctx, project)
+
+			if f := serverAccessLogFieldsFrom(ctx); f != nil {
+				f.appID = app.ID.String()
+			}
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -527,7 +575,7 @@ func appIPAllowlistMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handl
 			hasAllowlist, err := rpo.HasIPAllowlist(ctx, app.ID)
 			if err != nil {
 				log.Err(err).Str("app_id", app.ID.String()).Msg("appIPAllowlistMiddleware: failed to check allowlist")
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				api.WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 				return
 			}
 
@@ -540,7 +588,7 @@ func appIPAllowlistMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handl
 			// Get client IP
 			clientIP := getClientIP(r)
 			if clientIP == "" {
-				http.Error(w, "could not determine client IP", http.StatusForbidden)
+				api.WriteError(w, r, "error.ipNotAllowed", http.StatusForbidden)
 				return
 			}
 
@@ -548,14 +596,14 @@ func appIPAllowlistMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handl
 			entries, err := rpo.GetIPAllowlist(ctx, app.ID)
 			if err != nil {
 				log.Err(err).Str("app_id", app.ID.String()).Msg("appIPAllowlistMiddleware: failed to get allowlist")
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				api.WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 				return
 			}
 
 			// Check if client IP matches any entry
 			ip := net.ParseIP(clientIP)
 			if ip == nil {
-				http.Error(w, "IP address not allowed", http.StatusForbidden)
+				api.WriteError(w, r, "error.ipNotAllowed", http.StatusForbidden)
 				return
 			}
 
@@ -568,7 +616,7 @@ func appIPAllowlistMiddleware(rpo *repo.Repo) func(next http.Handler) http.Handl
 			}
 
 			if !allowed {
-				http.Error(w, "IP address not allowed", http.StatusForbidden)
+				api.WriteError(w, r, "error.ipNotAllowed", http.StatusForbidden)
 				return
 			}
 

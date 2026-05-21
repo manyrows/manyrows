@@ -19,6 +19,7 @@
 
 # Personal local notes/draft — not part of the project.
 /README1.md
+/TODO.md
 
 # Embedded UI bundle — copied from manyrows-ui/dist at build time
 manyrows-core/web/*

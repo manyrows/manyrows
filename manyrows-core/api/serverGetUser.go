@@ -1,10 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"manyrows-core/core"
+	"manyrows-core/core/repo"
 	"manyrows-core/utils"
 
 	"github.com/gofrs/uuid/v5"
@@ -18,7 +20,7 @@ type ServerUserResponse struct {
 	Fields      []core.UserFieldValue `json:"fields,omitempty"`
 }
 
-// GET /x/{workspaceSlug}/api/apps/{appId}/users?email=...&id=...
+// GET /x/{workspaceSlug}/api/v1/apps/{appId}/users?email=...&id=...
 func (handler *RequestHandler) HandleServerGetUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -40,7 +42,6 @@ func (handler *RequestHandler) HandleServerGetUser(w http.ResponseWriter, r *htt
 		return
 	}
 
-	_ = project
 	q := r.URL.Query()
 	email := strings.TrimSpace(strings.ToLower(q.Get("email")))
 	idStr := strings.TrimSpace(q.Get("id"))
@@ -62,7 +63,12 @@ func (handler *RequestHandler) HandleServerGetUser(w http.ResponseWriter, r *htt
 		}
 		user, err = handler.repo.GetUserByID(ctx, userID)
 		if err != nil {
-			WriteError(w, r, "error.notFound", http.StatusNotFound)
+			if errors.Is(err, repo.ErrNotFound) {
+				WriteError(w, r, "error.notFound", http.StatusNotFound)
+				return
+			}
+			log.Err(err).Msg("HandleServerGetUser: lookup by id failed")
+			WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 			return
 		}
 	} else {
@@ -77,6 +83,15 @@ func (handler *RequestHandler) HandleServerGetUser(w http.ResponseWriter, r *htt
 
 	if user == nil {
 		WriteError(w, r, "error.notFound", http.StatusNotFound)
+		return
+	}
+
+	// Server API scopes to app membership: the pool only shares credentials,
+	// so a user who exists in the pool but hasn't joined this app is not
+	// visible here. This also closes the cross-pool lookup (a foreign user
+	// has no app_users row for this app), so the by-id path needs no separate
+	// pool check.
+	if !handler.requireAppMember(w, r, app.ID, user.ID) {
 		return
 	}
 

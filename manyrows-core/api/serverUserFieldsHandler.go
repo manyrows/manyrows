@@ -6,12 +6,10 @@ import (
 	"manyrows-core/core"
 	"manyrows-core/utils"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/gofrs/uuid/v5"
 	"github.com/rs/zerolog/log"
 )
 
-// GET /x/{workspaceSlug}/api/apps/{appId}/user-fields
+// GET /x/{workspaceSlug}/api/v1/apps/{appId}/user-fields
 func (handler *RequestHandler) HandleServerGetUserFields(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -37,7 +35,7 @@ func (handler *RequestHandler) HandleServerGetUserFields(w http.ResponseWriter, 
 	utils.WriteJsonWithStatusCode(w, UserFieldsResponse{UserFields: fields}, http.StatusOK)
 }
 
-// GET /x/{workspaceSlug}/api/apps/{appId}/user-fields/users/{userId}
+// GET /x/{workspaceSlug}/api/v1/apps/{appId}/user-fields/users/{userId}
 func (handler *RequestHandler) HandleServerGetUserFieldValues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -53,18 +51,14 @@ func (handler *RequestHandler) HandleServerGetUserFieldValues(w http.ResponseWri
 		return
 	}
 
-	userID, err := uuid.FromString(chi.URLParam(r, "userId"))
-	if err != nil {
-		WriteError(w, r, "error.badRequest", http.StatusBadRequest)
+	userID, ok := handler.userIDFromURL(w, r)
+	if !ok {
 		return
 	}
 
-	// Scope check: the user must belong to this app's pool, otherwise
-	// the server SDK could read values from a foreign pool by guessing
-	// IDs.
-	target, err := handler.repo.GetUserByID(ctx, userID)
-	if err != nil || target == nil || target.UserPoolID != app.UserPoolID {
-		WriteError(w, r, "error.notFound", http.StatusNotFound)
+	// Server API scopes to app membership; the pool only shares credentials.
+	// A non-member (incl. a foreign-pool id) gets 404 here.
+	if !handler.requireAppMember(w, r, app.ID, userID) {
 		return
 	}
 

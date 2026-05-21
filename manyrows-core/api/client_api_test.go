@@ -299,7 +299,7 @@ func setupServerAPIRouter(t *testing.T) *chi.Mux {
 		})
 	}
 
-	// Server API router: /x/{workspaceSlug}/api/apps/{appId}/...
+	// Server API router: /x/{workspaceSlug}/api/v1/apps/{appId}/...
 	serverRouter := chi.NewRouter()
 	serverRouter.Use(wsMiddleware)
 
@@ -308,8 +308,15 @@ func setupServerAPIRouter(t *testing.T) *chi.Mux {
 	appRouter.Get("/", requestHandler.GetDeliveryForServer)
 	appRouter.Get("/check-permission", requestHandler.ServerCheckPermission)
 	appRouter.Get("/members", requestHandler.ServerGetAppMembers)
+	appRouter.Get("/users", requestHandler.HandleServerGetUser)
+	appRouter.Get("/user-fields", requestHandler.HandleServerGetUserFields)
+	appRouter.Get("/user-fields/users/{userId}", requestHandler.HandleServerGetUserFieldValues)
+	appRouter.Put("/user-fields/{userFieldId}/users/{userId}", requestHandler.ServerUpsertUserFieldValue)
+	appRouter.Delete("/user-fields/{userFieldId}/users/{userId}", requestHandler.ServerDeleteUserFieldValue)
+	appRouter.Delete("/users/{userId}/sessions", requestHandler.ServerRevokeUserSessions)
+	appRouter.Put("/users/{userId}/roles", requestHandler.ServerReplaceUserRoles)
 
-	serverRouter.Mount("/apps/{appId}", appRouter)
+	serverRouter.Mount("/v1/apps/{appId}", appRouter)
 	r.Mount("/x/{workspaceSlug}/api", serverRouter)
 
 	return r
@@ -1099,7 +1106,7 @@ func TestGetDeliveryForServer_Success(t *testing.T) {
 
 	// Note: This test doesn't include API key auth middleware for simplicity
 	// In production, this endpoint requires API key authentication
-	req := httptest.NewRequest(http.MethodGet, "/x/"+ws.Slug+"/api/apps/"+appID.String()+"/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -1143,7 +1150,7 @@ func TestGetDeliveryForServer_InvalidApp(t *testing.T) {
 
 	fakeAppID := uuid.Must(uuid.NewV4())
 
-	req := httptest.NewRequest(http.MethodGet, "/x/"+ws.Slug+"/api/apps/"+fakeAppID.String()+"/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/x/"+ws.Slug+"/api/v1/apps/"+fakeAppID.String()+"/", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -1237,7 +1244,7 @@ func TestServerCheckPermission_Allowed(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/check-permission?accountId="+user.ID.String()+"&permission=posts:read", nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/check-permission?accountId="+user.ID.String()+"&permission=posts:read", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -1289,7 +1296,7 @@ func TestServerCheckPermission_Denied(t *testing.T) {
 	}()
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/check-permission?accountId="+user.ID.String()+"&permission=posts:write", nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/check-permission?accountId="+user.ID.String()+"&permission=posts:write", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -1326,7 +1333,7 @@ func TestServerCheckPermission_MissingPermission(t *testing.T) {
 
 	accountID := uuid.Must(uuid.NewV4())
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/check-permission?accountId="+accountID.String(), nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/check-permission?accountId="+accountID.String(), nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -1353,7 +1360,7 @@ func TestServerCheckPermission_MissingAccountId(t *testing.T) {
 	}()
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/check-permission?permission=posts:read", nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/check-permission?permission=posts:read", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -1381,13 +1388,477 @@ func TestServerCheckPermission_AccountNotFound(t *testing.T) {
 
 	fakeAccountID := uuid.Must(uuid.NewV4())
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/check-permission?accountId="+fakeAccountID.String()+"&permission=posts:read", nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/check-permission?accountId="+fakeAccountID.String()+"&permission=posts:read", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("expected status %d, got %d: %s", http.StatusNotFound, rr.Code, rr.Body.String())
+	}
+}
+
+// TestServerGetUser_SamePool confirms the happy path: looking up a user by ID
+// through an app whose pool the user belongs to returns the user.
+func TestServerGetUser_SamePool(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	emailAddr := "srv-getuser-ok-" + GenerateUniqueSlug("test") + "@example.com"
+	acc := testEnv.CreateTestAccount(t, emailAddr)
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	user, _, err := testEnv.GetOrCreateUserWithMembership(ctx, acc.Email, &core.App{ID: appID}, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/users?id="+user.ID.String(), nil)
+
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp api.ServerUserResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.User == nil || resp.User.ID != user.ID {
+		t.Fatalf("expected user %s in response, got %+v", user.ID, resp.User)
+	}
+}
+
+// TestServerGetUser_CrossPoolDenied is the regression guard for the IDOR fix:
+// GetUserByID is global, so without the pool scope check an API key for one
+// app could read any user on the install by ID. The user here lives in a
+// different app's pool, so the lookup must 404 rather than leak the record.
+func TestServerGetUser_CrossPoolDenied(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	emailAddr := "srv-getuser-xpool-" + GenerateUniqueSlug("test") + "@example.com"
+	acc := testEnv.CreateTestAccount(t, emailAddr)
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+
+	// Two products, one app each, so the apps land in distinct user pools
+	// (a single product allows only one app per type).
+	callerProject := testEnv.CreateTestProduct(t, ws, acc, "Caller Product", GenerateUniqueSlug("proj"))
+	otherProject := testEnv.CreateTestProduct(t, ws, acc, "Other Product", GenerateUniqueSlug("proj"))
+	callerApp := createTestApp(t, ws.ID, callerProject.ID, uuid.Nil, "Caller App")
+	otherApp := createTestApp(t, ws.ID, otherProject.ID, uuid.Nil, "Other App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*callerProject, *otherProject}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id IN ($1, $2)", callerApp, otherApp)
+	}()
+
+	ctx := context.Background()
+	// User belongs to otherApp's pool, not callerApp's.
+	foreignUser, _, err := testEnv.GetOrCreateUserWithMembership(ctx, acc.Email, &core.App{ID: otherApp}, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", foreignUser.ID)
+	}()
+
+	// Look the foreign user up by ID through callerApp — must not leak.
+	req := httptest.NewRequest(http.MethodGet,
+		"/x/"+ws.Slug+"/api/v1/apps/"+callerApp.String()+"/users?id="+foreignUser.ID.String(), nil)
+
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d (cross-pool lookup must not leak), got %d: %s",
+			http.StatusNotFound, rr.Code, rr.Body.String())
+	}
+}
+
+// TestServerGetUser_PoolMemberNotInApp_Denied locks in the scoping rule: the
+// server API gates on app_users membership, not the pool. A user who exists in
+// the app's pool but never joined the app must 404 (the pool only shares
+// credentials, it is not an access boundary).
+func TestServerGetUser_PoolMemberNotInApp_Denied(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-getuser-nm-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	appRow, err := testEnv.Repo.GetAppByID(ctx, appID)
+	if err != nil {
+		t.Fatalf("GetAppByID: %v", err)
+	}
+
+	// Create the user in the app's pool but DO NOT add app membership.
+	user, _, err := testEnv.Repo.GetOrCreateUser(ctx, acc.Email, &appRow, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/users?id="+user.ID.String(), nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for a pool user who isn't an app member, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// =====================
+// Server API write tests
+// =====================
+
+func TestServerReplaceUserRoles_NotMember(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-roles-nm-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	appRow, err := testEnv.Repo.GetAppByID(ctx, appID)
+	if err != nil {
+		t.Fatalf("GetAppByID: %v", err)
+	}
+	// Pool user, not an app member.
+	user, _, err := testEnv.Repo.GetOrCreateUser(ctx, acc.Email, &appRow, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("GetOrCreateUser: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	body, _ := json.Marshal(api.ServerReplaceRolesRequest{Roles: []string{"anything"}})
+	req := httptest.NewRequest(http.MethodPut,
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/users/"+user.ID.String()+"/roles", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 assigning roles to a non-member, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestServerRevokeUserSessions_Success(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-revoke-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	user, _, err := testEnv.GetOrCreateUserWithMembership(ctx, acc.Email, &core.App{ID: appID}, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM client_sessions WHERE user_id = $1", user.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	now := time.Now().UTC()
+	aID := appID
+	for i := 0; i < 2; i++ {
+		ses := &core.ClientSession{
+			ID:         uuid.Must(uuid.NewV4()),
+			UserID:     user.ID,
+			AppID:      &aID,
+			CreatedAt:  now,
+			LastSeenAt: now,
+			ExpiresAt:  now.Add(24 * time.Hour),
+		}
+		if err := testEnv.Repo.InsertClientSession(ctx, ses); err != nil {
+			t.Fatalf("InsertClientSession: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/users/"+user.ID.String()+"/sessions", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp api.ServerRevokeSessionsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if resp.Revoked != 2 {
+		t.Fatalf("expected 2 sessions revoked, got %d", resp.Revoked)
+	}
+
+	remaining, err := testEnv.Repo.GetActiveClientSessionsByUserID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetActiveClientSessionsByUserID: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("expected no sessions after revoke, got %d", len(remaining))
+	}
+}
+
+func TestServerRevokeUserSessions_NotMember(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-revoke-nm-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	// Random user that is not a member of the app.
+	req := httptest.NewRequest(http.MethodDelete,
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/users/"+uuid.Must(uuid.NewV4()).String()+"/sessions", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for non-member, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestServerReplaceUserRoles_Success(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-roles-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM user_roles WHERE app_id = $1", appID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	user, _, err := testEnv.GetOrCreateUserWithMembership(ctx, acc.Email, &core.App{ID: appID}, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	slug := GenerateUniqueSlug("editor")
+	role, err := testEnv.Repo.CreateRole(ctx, repo.CreateRoleParams{
+		ProductID: project.ID, Name: "Editor", Slug: slug, Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM roles WHERE id = $1", role.ID)
+	}()
+
+	body, _ := json.Marshal(api.ServerReplaceRolesRequest{Roles: []string{slug}})
+	req := httptest.NewRequest(http.MethodPut,
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/users/"+user.ID.String()+"/roles", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp api.ServerRolesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(resp.Roles) != 1 || resp.Roles[0] != slug {
+		t.Fatalf("expected roles [%s], got %v", slug, resp.Roles)
+	}
+}
+
+func TestServerReplaceUserRoles_UnknownSlug(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-roles-bad-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	user, _, err := testEnv.GetOrCreateUserWithMembership(ctx, acc.Email, &core.App{ID: appID}, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	body, _ := json.Marshal(api.ServerReplaceRolesRequest{Roles: []string{"does-not-exist"}})
+	req := httptest.NewRequest(http.MethodPut,
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/users/"+user.ID.String()+"/roles", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown slug, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestServerUpsertAndDeleteUserFieldValue(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-field-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(context.Background(), "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	appRow, err := testEnv.Repo.GetAppByID(ctx, appID)
+	if err != nil {
+		t.Fatalf("GetAppByID: %v", err)
+	}
+
+	now := time.Now().UTC()
+	field, err := testEnv.Repo.CreateUserField(ctx, core.UserField{
+		UserPoolID: appRow.UserPoolID,
+		Key:        "nickname",
+		ValueType:  core.UserFieldValueTypeString,
+		Visibility: core.UserFieldVisibilityServer,
+		Label:      "Nickname",
+		Status:     "active",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		CreatedBy:  acc.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateUserField: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM user_field_values WHERE user_field_id = $1", field.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM user_fields WHERE id = $1", field.ID)
+	}()
+
+	user, _, err := testEnv.GetOrCreateUserWithMembership(ctx, acc.Email, &core.App{ID: appID}, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	defer func() {
+		pool := testEnv.DB.Pool()
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	base := "/x/" + ws.Slug + "/api/v1/apps/" + appID.String() +
+		"/user-fields/" + field.ID.String() + "/users/" + user.ID.String()
+
+	// Wrong type → 400.
+	bad := httptest.NewRequest(http.MethodPut, base, strings.NewReader(`{"value": true}`))
+	badRR := httptest.NewRecorder()
+	router.ServeHTTP(badRR, bad)
+	if badRR.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for wrong-typed value, got %d: %s", badRR.Code, badRR.Body.String())
+	}
+
+	// Valid upsert → 200 and persisted.
+	put := httptest.NewRequest(http.MethodPut, base, strings.NewReader(`{"value": "ace"}`))
+	putRR := httptest.NewRecorder()
+	router.ServeHTTP(putRR, put)
+	if putRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 for upsert, got %d: %s", putRR.Code, putRR.Body.String())
+	}
+	values, err := testEnv.Repo.GetUserFieldValuesByUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserFieldValuesByUser: %v", err)
+	}
+	if len(values) != 1 || string(values[0].ValueJSON) != `"ace"` {
+		t.Fatalf("expected stored value \"ace\", got %+v", values)
+	}
+
+	// Delete → 204 and gone.
+	del := httptest.NewRequest(http.MethodDelete, base, nil)
+	delRR := httptest.NewRecorder()
+	router.ServeHTTP(delRR, del)
+	if delRR.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for delete, got %d: %s", delRR.Code, delRR.Body.String())
+	}
+	values, err = testEnv.Repo.GetUserFieldValuesByUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserFieldValuesByUser after delete: %v", err)
+	}
+	if len(values) != 0 {
+		t.Fatalf("expected no values after delete, got %d", len(values))
 	}
 }
 
@@ -2438,7 +2909,7 @@ func TestServerGetAppMembers_Success(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/members", nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/members", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -2493,7 +2964,7 @@ func TestServerGetAppMembers_Empty(t *testing.T) {
 	}()
 
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/members", nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/members", nil)
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -2574,7 +3045,7 @@ func TestServerGetAppMembers_EmailFilter(t *testing.T) {
 
 	// Search with matching email
 	req := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/members?email="+slug, nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/members?email="+slug, nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -2595,7 +3066,7 @@ func TestServerGetAppMembers_EmailFilter(t *testing.T) {
 
 	// Search with non-matching email
 	req2 := httptest.NewRequest(http.MethodGet,
-		"/x/"+ws.Slug+"/api/apps/"+appID.String()+"/members?email=nonexistent-xyz", nil)
+		"/x/"+ws.Slug+"/api/v1/apps/"+appID.String()+"/members?email=nonexistent-xyz", nil)
 	rr2 := httptest.NewRecorder()
 	router.ServeHTTP(rr2, req2)
 

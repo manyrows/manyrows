@@ -63,10 +63,12 @@ var apiTranslations = map[string]map[string]string{
 		"error.apiKeyNotFound":        "API key not found",
 		"error.sessionNotFound":       "Session not found",
 		"error.appNotFound":           "App not found",
+		"error.appDisabled":           "App is disabled",
 
 		// ID errors
 		"error.missingProductId":     "Missing project ID",
 		"error.missingWorkspaceId":   "Missing workspace ID",
+		"error.missingWorkspaceSlug": "Missing workspace slug",
 		"error.missingAccountId":     "Missing account ID",
 		"error.invalidProductId":     "Invalid project ID",
 		"error.invalidWorkspaceId":   "Invalid workspace ID",

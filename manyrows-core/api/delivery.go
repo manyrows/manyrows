@@ -1,12 +1,14 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"manyrows-core/core"
-	"manyrows-core/utils"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/rs/zerolog/log"
@@ -278,5 +280,50 @@ func (handler *RequestHandler) GetDeliveryForServer(w http.ResponseWriter, r *ht
 		Flags:       flags,
 	}
 
-	utils.WriteJsonWithStatusCode(w, resp, http.StatusOK)
+	body, err := json.Marshal(resp)
+	if err != nil {
+		log.Err(err).Msg("failed to marshal delivery response")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+
+	// ETag over the response body so customer servers can poll this endpoint
+	// cheaply: if config and flags are unchanged we return 304 with no payload.
+	// Hashing the body (rather than trusting updatedAt) also catches deletes,
+	// which don't bump any row's updated_at.
+	sum := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// etagMatches reports whether an If-None-Match header value matches the given
+// ETag, per RFC 7232: "*" matches anything, otherwise the header is a
+// comma-separated list of candidates compared with weak semantics (the W/
+// prefix is ignored for the comparison).
+func etagMatches(ifNoneMatch, etag string) bool {
+	ifNoneMatch = strings.TrimSpace(ifNoneMatch)
+	if ifNoneMatch == "" {
+		return false
+	}
+	if ifNoneMatch == "*" {
+		return true
+	}
+	for _, candidate := range strings.Split(ifNoneMatch, ",") {
+		c := strings.TrimSpace(candidate)
+		c = strings.TrimPrefix(c, "W/")
+		if c == etag {
+			return true
+		}
+	}
+	return false
 }
