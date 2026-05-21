@@ -2,8 +2,9 @@
 
 Self-hostable user authentication you can drop in front of your apps.
 Sign-in, password reset, email verification, magic links, OAuth (Google,
-Apple, Microsoft, GitHub), passkeys, sessions, audit logs, role-based
-access - running as a single Go binary with Postgres.
+Apple, Microsoft, GitHub) plus any OIDC/OAuth2 provider, passkeys,
+sessions, audit logs, role-based access - running as a single Go binary
+with Postgres.
 
 One install runs many apps. Apps share users through user pools (one
 app or several SSO-style), with their own sign-in settings, OAuth
@@ -72,7 +73,15 @@ docker compose down
 ## What you get
 
 - **Sign-in methods** per app: password, OTP code, magic link, OAuth
-  (Google / Apple / Microsoft / GitHub), passkeys.
+  (Google / Apple / Microsoft / GitHub), any OIDC/OAuth2 provider,
+  passkeys.
+- **Bring-your-own identity providers** - beyond the four built-in
+  social logins, connect any OpenID Connect or OAuth2 provider per app
+  (Okta, Auth0, Keycloak, Entra/Azure AD, GitLab, Discord, ...) from the
+  admin UI: paste an issuer URL (or explicit endpoints) plus client
+  credentials - no code, no release. Covers corporate SSO and the long
+  tail. PKCE + nonce, signature/issuer/audience verification, and
+  https-only endpoints are enforced for you.
 - **Workspace + project + app hierarchy** - one ManyRows install
   groups environments (dev / staging / prod) under projects, and
   projects under workspaces.
