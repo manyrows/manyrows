@@ -8,6 +8,8 @@ import (
 	"manyrows-core/api"
 	"manyrows-core/core"
 	"manyrows-core/core/repo"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 /*
@@ -326,13 +328,13 @@ func TestResolveOAuthSignInIdentity_CreatesUserAndIdentityWhenRegistrationOn(t *
 	}
 }
 
-func TestResolveOAuthSignInIdentity_GenericPerSlugIsolation(t *testing.T) {
+func TestResolveOAuthSignInIdentity_GenericPerProviderIsolation(t *testing.T) {
 	// The whole point of the provider-key decoupling: two distinct
-	// external IdPs (different slugs) can return the SAME `sub` (a sub is
-	// unique only per-issuer). With per-IdP keys ("idp:<slug>") they must
-	// link as two SEPARATE identities on the same pool user — matched by
-	// email — not collide into one. And user.source stays the coarse
-	// "external" bucket, never a per-slug value.
+	// external IdPs can return the SAME `sub` (a sub is unique only
+	// per-issuer). With per-IdP keys ("idp:<config-uuid>") they must link
+	// as two SEPARATE identities on the same pool user — matched by email
+	// — not collide into one. And user.source stays the coarse "external"
+	// bucket, never a per-provider value.
 	ctx := context.Background()
 	acc := testEnv.CreateTestAccount(t, "roi-genidp-"+GenerateUniqueSlug("u")+"@example.com")
 	ws := testEnv.CreateTestWorkspace(t, acc, "WS", GenerateUniqueSlug("ws"))
@@ -343,22 +345,27 @@ func TestResolveOAuthSignInIdentity_GenericPerSlugIsolation(t *testing.T) {
 	email := "genidp-" + GenerateUniqueSlug("u") + "@example.com"
 	ts := NewTestServices(t)
 
-	// First IdP (okta) creates the user.
+	idpA := uuid.Must(uuid.NewV4()) // e.g. an Okta config
+	idpB := uuid.Must(uuid.NewV4()) // e.g. an Auth0 config
+	keyA := core.ExternalIDPProviderKey(idpA)
+	keyB := core.ExternalIDPProviderKey(idpB)
+
+	// First IdP creates the user.
 	u1, created1, err := ts.Handler.ResolveOAuthSignInIdentity(ctx, app, email,
-		core.UserSourceExternalIDP, core.ExternalIDPProviderKey("acme-okta"), "shared-sub-123")
+		core.UserSourceExternalIDP, keyA, "shared-sub-123")
 	if err != nil {
-		t.Fatalf("okta sign-in: %v", err)
+		t.Fatalf("idp A sign-in: %v", err)
 	}
 	if !created1 {
 		t.Error("expected first generic sign-in to create the user")
 	}
 
-	// Second IdP (auth0) with the SAME sub but a different slug — resolves
+	// Second IdP with the SAME sub but a different config key — resolves
 	// to the same user by email and links a SECOND identity.
 	u2, created2, err := ts.Handler.ResolveOAuthSignInIdentity(ctx, app, email,
-		core.UserSourceExternalIDP, core.ExternalIDPProviderKey("globex-auth0"), "shared-sub-123")
+		core.UserSourceExternalIDP, keyB, "shared-sub-123")
 	if err != nil {
-		t.Fatalf("auth0 sign-in: %v", err)
+		t.Fatalf("idp B sign-in: %v", err)
 	}
 	if created2 {
 		t.Error("expected second generic sign-in to match the existing user, not create")
@@ -373,14 +380,14 @@ func TestResolveOAuthSignInIdentity_GenericPerSlugIsolation(t *testing.T) {
 		t.Fatalf("list identities: %v", err)
 	}
 	if len(rows) != 2 {
-		t.Fatalf("expected 2 distinct identities (one per idp slug), got %d: %+v", len(rows), rows)
+		t.Fatalf("expected 2 distinct identities (one per idp config), got %d: %+v", len(rows), rows)
 	}
 	gotProviders := map[string]bool{}
 	for _, row := range rows {
 		gotProviders[string(row.Provider)] = true
 	}
-	if !gotProviders["idp:acme-okta"] || !gotProviders["idp:globex-auth0"] {
-		t.Fatalf("expected idp:acme-okta and idp:globex-auth0 keys, got %+v", gotProviders)
+	if !gotProviders[keyA] || !gotProviders[keyB] {
+		t.Fatalf("expected keys %q and %q, got %+v", keyA, keyB, gotProviders)
 	}
 
 	// Coarse origin only — not a per-slug value.

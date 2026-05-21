@@ -25,10 +25,12 @@ CREATE TABLE external_idps (
     id uuid NOT NULL,
     app_id uuid NOT NULL,
 
-    -- Stable per-app key. Doubles as the URL route segment
-    -- (/auth/idp/<slug>/...), the AppKit button identity, and the
-    -- identity provider-key stored in user_identities.provider as
-    -- "idp:<slug>" — so each external IdP links as a distinct identity.
+    -- Stable per-app key. Used as the URL route segment
+    -- (/auth/idp/<slug>/...) and the AppKit button identity. NOTE: the
+    -- identity provider-key in user_identities.provider is keyed by this
+    -- row's UUID ("idp:<id>"), NOT the slug — identities are matched
+    -- pool-wide and slugs are only unique per-app, so a slug-based key
+    -- could collide across apps that share a pool. See ExternalIDPProviderKey.
     slug text NOT NULL,
     display_name text NOT NULL,
     enabled boolean DEFAULT false NOT NULL,

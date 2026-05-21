@@ -21,14 +21,17 @@ const (
 )
 
 // ExternalIDPProviderKey is the value written to user_identities.provider
-// for an identity that signed in through this external IdP. It is
-// per-provider ("idp:<slug>") so each configured IdP links as a distinct
-// identity — a user can connect Okta AND Discord — and so a `sub`
-// (unique only per-issuer) never collides across two IdPs. The "idp:"
-// prefix is mode-neutral (covers OIDC and OAuth2 providers alike) and
-// can't collide with the bespoke keys ("google", ... — no colon).
-func ExternalIDPProviderKey(slug string) string {
-	return "idp:" + slug
+// for an identity that signed in through this external IdP. It is keyed
+// by the config's UUID, not its slug: identities are matched POOL-wide
+// (FindUserByIdentity keys on user_pool_id), but slugs are unique only
+// per-app — so two apps sharing a pool could both use slug "okta" for
+// DIFFERENT issuers, and since a `sub` is unique only per-issuer, a
+// slug-based key could collide two distinct people. The config UUID is
+// pool-global and stable for the provider's lifetime. The "idp:" prefix
+// is mode-neutral and can't collide with the bespoke keys ("google", …
+// — no colon).
+func ExternalIDPProviderKey(id uuid.UUID) string {
+	return "idp:" + id.String()
 }
 
 // ExternalIDP is one external identity provider configured for an app —
@@ -73,5 +76,5 @@ type ExternalIDP struct {
 
 // ProviderKey returns the user_identities.provider value for this IdP.
 func (e *ExternalIDP) ProviderKey() string {
-	return ExternalIDPProviderKey(e.Slug)
+	return ExternalIDPProviderKey(e.ID)
 }

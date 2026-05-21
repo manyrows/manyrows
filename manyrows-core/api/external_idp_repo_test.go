@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"manyrows-core/auth"
 	"manyrows-core/core"
 	"manyrows-core/core/repo"
 
@@ -63,8 +65,8 @@ func TestExternalIDPRepo_CRUD(t *testing.T) {
 		t.Fatalf("oidc row should have empty oauth2 endpoints, got authorize=%q token=%q userinfo=%q",
 			got.AuthorizeURL, got.TokenURL, got.UserinfoURL)
 	}
-	if got.ProviderKey() != "idp:acme-okta" {
-		t.Fatalf("provider key: %q", got.ProviderKey())
+	if got.ProviderKey() != "idp:"+got.ID.String() {
+		t.Fatalf("provider key should be idp:<config-uuid>, got %q", got.ProviderKey())
 	}
 
 	all, err := testEnv.Repo.ListExternalIDPsByApp(ctx, app.ID)
@@ -92,6 +94,36 @@ func TestExternalIDPRepo_CRUD(t *testing.T) {
 	}
 	if _, err := testEnv.Repo.GetExternalIDPByAppAndSlug(ctx, app.ID, "acme-okta"); !errors.Is(err, repo.ErrExternalIDPNotFound) {
 		t.Fatalf("expected ErrExternalIDPNotFound after delete, got %v", err)
+	}
+}
+
+// TestExternalIDPState_SignVerifyRoundTrip proves the generic flow can
+// sign + verify OAuth state under the "idp:<uuid>" provider key.
+// Regression for migration 00006: oauth_states.provider originally had a
+// CHECK allowlisting only {google,apple,microsoft,github}, which would
+// reject this at InsertOAuthState time and break the authorize handler.
+func TestExternalIDPState_SignVerifyRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	acc := testEnv.CreateTestAccount(t, "extidp-state-"+GenerateUniqueSlug("u")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "ExtIDP State WS", GenerateUniqueSlug("ws"))
+	app := testEnv.CreateTestApp(t, ws, acc)
+
+	key := []byte("test-oauth-state-hmac-key-0123456789")
+	providerKey := core.ExternalIDPProviderKey(uuid.Must(uuid.NewV4()))
+
+	state, err := auth.SignOAuthState(ctx, testEnv.Repo, key, app.ID, providerKey, "https://app.example", nil, time.Minute)
+	if err != nil {
+		t.Fatalf("SignOAuthState with %q provider failed (oauth_states CHECK?): %v", providerKey, err)
+	}
+	gotApp, origin, _, err := auth.VerifyOAuthState(ctx, testEnv.Repo, key, state, providerKey)
+	if err != nil {
+		t.Fatalf("VerifyOAuthState: %v", err)
+	}
+	if gotApp != app.ID {
+		t.Fatalf("verified appID = %s, want %s", gotApp, app.ID)
+	}
+	if origin != "https://app.example" {
+		t.Fatalf("openerOrigin round-trip = %q", origin)
 	}
 }
 
