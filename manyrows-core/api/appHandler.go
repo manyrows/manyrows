@@ -35,6 +35,11 @@ type adminAppResponse struct {
 	HasMicrosoftClientSecret  bool   `json:"hasMicrosoftClientSecret"`
 	GithubOAuthRedirectURI    string `json:"githubOAuthRedirectUri,omitempty"`
 	HasGithubClientSecret     bool   `json:"hasGithubClientSecret"`
+	// QRSignInURL is the customer-facing /qr-sign-in entry-point.
+	// Server-computed (AppBaseURL + workspace.Slug + app.ID) so the
+	// admin UI doesn't have to build it client-side. Empty when the
+	// install BASE_URL isn't pinned yet.
+	QRSignInURL string `json:"qrSignInUrl,omitempty"`
 }
 
 // AppBaseURL returns the base URL the OAuth providers should redirect to
@@ -70,6 +75,7 @@ func (handler *RequestHandler) toAdminAppResponse(a core.App, ws *core.Workspace
 		resp.AppleOAuthRedirectURI = baseURL + "/x/" + ws.Slug + "/apps/" + a.ID.String() + "/auth/apple/callback"
 		resp.MicrosoftOAuthRedirectURI = baseURL + "/x/" + ws.Slug + "/apps/" + a.ID.String() + "/auth/microsoft/callback"
 		resp.GithubOAuthRedirectURI = baseURL + "/x/" + ws.Slug + "/apps/" + a.ID.String() + "/auth/github/callback"
+		resp.QRSignInURL = baseURL + "/x/" + ws.Slug + "/apps/" + a.ID.String() + "/qr-sign-in"
 	}
 	return resp
 }

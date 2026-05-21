@@ -88,6 +88,9 @@ export type App = {
   transportMode?: "local" | "cookie";
   sessionCookieSameSite?: "lax" | "strict";
   qrSignInEnabled?: boolean;
+  // Server-computed QR sign-in URL (AppBaseURL + workspace slug +
+  // app id + /qr-sign-in). Present whenever BASE_URL is pinned.
+  qrSignInUrl?: string;
 };
 
 type RolesResponse = { roles: Role[] };
@@ -2142,11 +2145,13 @@ function QRSignInCard({ app, cardURL, onSaved, onError, onSuccess }: CardProps) 
 
   const dirty = enabled !== !!app.qrSignInEnabled;
 
-  // The hosted /qr-sign-in URL pattern. Customers link their "Sign in
-  // with phone" entry-point to this; AppKit auto-renders a button
-  // once enabled, but customers integrating without AppKit need the
-  // URL.
-  const qrSignInURL = `${window.location.origin}${cardURL}/qr-sign-in`;
+  // The hosted /qr-sign-in URL pattern. Server-computed (lives at the
+  // PUBLIC per-app path /x/<slug>/apps/<id>/qr-sign-in, NOT under
+  // /admin/) so the UI doesn't try to derive it from cardURL.
+  // Customers link their "Sign in with phone" entry-point here; AppKit
+  // auto-renders a button once enabled, but customers integrating
+  // without AppKit need the URL.
+  const qrSignInURL = app.qrSignInUrl || "";
 
   async function copyToClipboard(text: string, label: string) {
     try {
@@ -2221,16 +2226,24 @@ function QRSignInCard({ app, cardURL, onSaved, onError, onSuccess }: CardProps) 
             "Link to this from your app to bootstrap the QR flow. After the user scans + approves on their phone, tokens land in the URL fragment at the return_to target.",
         })}
       >
-        <CopyableUri
-          label={t("apps.qr.urlLabel", { defaultValue: "QR sign-in URL" })}
-          uri={qrSignInURL}
-          onCopy={() => copyToClipboard(qrSignInURL, "QR URL")}
-          help={t("apps.qr.urlHelp", {
-            defaultValue:
-              "Append ?return_to=<your-callback> when linking. return_to host must match App URL.",
-          })}
-          copyTitle={t("apps.copyQRUrl", { defaultValue: "Copy QR URL" })}
-        />
+        {qrSignInURL ? (
+          <CopyableUri
+            label={t("apps.qr.urlLabel", { defaultValue: "QR sign-in URL" })}
+            uri={qrSignInURL}
+            onCopy={() => copyToClipboard(qrSignInURL, "QR URL")}
+            help={t("apps.qr.urlHelp", {
+              defaultValue:
+                "Append ?return_to=<your-callback> when linking. return_to host must match App URL.",
+            })}
+            copyTitle={t("apps.copyQRUrl", { defaultValue: "Copy QR URL" })}
+          />
+        ) : (
+          <Typography variant="caption" color="text.secondary">
+            {t("apps.qr.urlPending", {
+              defaultValue: "URL will appear once MANYROWS_BASE_URL is pinned (happens on first admin register).",
+            })}
+          </Typography>
+        )}
       </Section>
 
       <SaveBar dirty={dirty} saving={saving} onSave={() => void save()} onDiscard={() => setEnabled(!!app.qrSignInEnabled)} />

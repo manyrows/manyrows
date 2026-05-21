@@ -96,6 +96,54 @@ func TestAdminQRConfig_EnableSucceedsWithAppURL(t *testing.T) {
 // TestAdminQRConfig_DisableAlwaysAllowed proves the guard only fires
 // on enable — admin can flip OFF regardless of app_url state, even
 // after the field is cleared.
+// TestAdminQRConfig_URLSurfacedOnRegularGet verifies that the
+// server-computed QR sign-in URL is included on the regular admin
+// GET /apps/{id} response (via toAdminAppResponse), not just on
+// the post-PUT response. Regression test for audit finding #2:
+// the UI initially built the URL from the admin-side cardURL which
+// produced a 404-able path.
+func TestAdminQRConfig_URLSurfacedOnRegularGet(t *testing.T) {
+	_, ws, project, appID, _, claims := createQRAppFixture(t)
+
+	// Build a fresh router with the GET-app route (the QR-only
+	// setupQRAdminRouter doesn't wire GET).
+	svc := NewTestServices(t)
+	r2, ws2 := NewAdminWorkspaceRouter(t, svc)
+	ws2.Get("/products/{productId}/apps/{appId}", svc.Handler.HandleGetApp)
+
+	getReq := httptest.NewRequest(http.MethodGet,
+		"/admin/workspace/"+ws.ID.String()+"/products/"+project.ID.String()+"/apps/"+appID.String(),
+		nil)
+	testEnv.SetSessionCookie(t, getReq, claims)
+	getRR := httptest.NewRecorder()
+	r2.ServeHTTP(getRR, getReq)
+
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("GET app expected 200, got %d (body=%s)", getRR.Code, getRR.Body.String())
+	}
+	var resp struct {
+		QRSignInURL string `json:"qrSignInUrl"`
+	}
+	if err := json.Unmarshal(getRR.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.QRSignInURL == "" {
+		t.Fatalf("qrSignInUrl should be populated on regular GET; got empty (full body=%s)", getRR.Body.String())
+	}
+	// Must be the PUBLIC path /x/<slug>/apps/<id>/qr-sign-in, NOT
+	// the admin /admin/workspace/... path that the old UI was
+	// constructing.
+	if !bytes.Contains([]byte(resp.QRSignInURL), []byte("/x/")) {
+		t.Fatalf("qrSignInUrl should contain /x/<slug>/, got %q", resp.QRSignInURL)
+	}
+	if !bytes.Contains([]byte(resp.QRSignInURL), []byte("/qr-sign-in")) {
+		t.Fatalf("qrSignInUrl should end with /qr-sign-in, got %q", resp.QRSignInURL)
+	}
+	if bytes.Contains([]byte(resp.QRSignInURL), []byte("/admin/")) {
+		t.Fatalf("qrSignInUrl must NOT contain /admin/, got %q", resp.QRSignInURL)
+	}
+}
+
 func TestAdminQRConfig_DisableAlwaysAllowed(t *testing.T) {
 	router := setupQRAdminRouter(t)
 	_, ws, project, appID, _, claims := createQRAppFixture(t)

@@ -491,6 +491,32 @@ func TestPair_StartRespects404WhenDisabled(t *testing.T) {
 	}
 }
 
+// TestPair_WaitRespects404WhenDisabled verifies that disabling the
+// toggle mid-flight kills the wait endpoint immediately — even with
+// a previously-approved pairing in the DB, /wait won't mint tokens.
+// Bounds the in-flight window to "as long as the toggle stays on"
+// rather than "90s after toggle flips off."
+func TestPair_WaitRespects404WhenDisabled(t *testing.T) {
+	e := setupPairingRouter(t)
+	id, code, _ := startPairing(t, e)
+	_, accessJWT := e.seedPhoneSession(t)
+	if rr := approve(t, e, accessJWT, code); rr.Code != http.StatusNoContent {
+		t.Fatalf("approve setup: %d", rr.Code)
+	}
+
+	// Admin flips it off — even though there's an approved pairing
+	// ready to mint tokens.
+	if _, err := testEnv.DB.Pool().Exec(context.Background(),
+		`update apps set qr_sign_in_enabled = false where id = $1`, e.app.ID); err != nil {
+		t.Fatalf("disable qr: %v", err)
+	}
+
+	rr := waitOnce(t, e, id)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("/wait with toggle off should 404, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+}
+
 // TestPair_QRSignInPageRespects404WhenDisabled — same gate at the
 // hosted desktop page.
 func TestPair_QRSignInPageRespects404WhenDisabled(t *testing.T) {

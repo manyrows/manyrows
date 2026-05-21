@@ -140,6 +140,15 @@ func (handler *RequestHandler) HandleAuthPairWait(w http.ResponseWriter, r *http
 		WriteError(w, r, "error.notFound", http.StatusNotFound)
 		return
 	}
+	// Disable kills in-flight flows immediately rather than waiting for
+	// the 90s TTL — the wait endpoint is where tokens actually mint.
+	// Approve / cancel are intentionally NOT gated (idempotent, no
+	// token effect) so the phone can still cleanly cancel after toggle
+	// flipped mid-flow.
+	if !app.QRSignInEnabled {
+		WriteError(w, r, "error.notFound", http.StatusNotFound)
+		return
+	}
 
 	idStr := strings.TrimSpace(r.URL.Query().Get("id"))
 	id, err := uuid.FromString(idStr)
