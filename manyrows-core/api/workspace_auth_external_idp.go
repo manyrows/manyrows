@@ -298,6 +298,28 @@ func (handler *RequestHandler) processExternalIDPCallback(w http.ResponseWriter,
 		return
 	}
 
+	// Require a verified email — same bar as every bespoke provider
+	// (Google/Apple verify, GitHub filters to verified, Microsoft uses
+	// xms_edov), and the contract completeTier1OAuthLogin documents.
+	// Without this an external IdP that lets a user assert an arbitrary
+	// unverified email could hijack an existing account through the
+	// email-fallback link in ResolveOAuthSignInIdentity. Providers that
+	// don't emit email_verified will be rejected here until a per-IdP
+	// "trust unverified email" opt-out exists (tracked separately).
+	if !info.EmailVerified {
+		handler.writeAuthLogFromRequest(r, AuthLogInput{
+			WorkspaceID:   ws.ID,
+			AppID:         &app.ID,
+			Event:         core.AuthEventLoginFailed,
+			Method:        core.AuthMethodExternalIDP,
+			Outcome:       core.AuthOutcomeFailed,
+			FailureReason: core.AuthFailEmailNotVerified,
+			ActorType:     core.AuthActorSelf,
+		})
+		WriteError(w, r, "error.emailNotVerified", http.StatusForbidden)
+		return
+	}
+
 	handler.completeTier1OAuthLogin(w, r, ws, app, info.Email, ip, false, tier1OAuthLoginOpts{
 		AuthMethod:        core.AuthMethodExternalIDP,
 		UserSource:        core.UserSourceExternalIDP,
