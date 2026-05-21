@@ -112,11 +112,11 @@ func (c ProviderConfig) scopesOrDefault() string {
 	return c.Scopes
 }
 
-// requireSecureURL rejects an endpoint unless it's https — or http to a
+// RequireSecureURL rejects an endpoint unless it's https — or http to a
 // loopback host, which we allow so local dev / tests work. Defends
 // against tokens, secrets, and authorization codes riding cleartext, and
 // against a downgraded endpoint being fetched server-side (SSRF/MITM).
-func requireSecureURL(rawURL string) error {
+func RequireSecureURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("%w: malformed URL %q", ErrConfig, rawURL)
@@ -148,7 +148,7 @@ func resolveEndpoints(ctx context.Context, cfg ProviderConfig) (Endpoints, error
 			if u == "" {
 				continue
 			}
-			if err := requireSecureURL(u); err != nil {
+			if err := RequireSecureURL(u); err != nil {
 				return Endpoints{}, err
 			}
 		}

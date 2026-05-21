@@ -52,7 +52,7 @@ func Discover(ctx context.Context, issuer string) (Endpoints, error) {
 	if issuer == "" {
 		return Endpoints{}, fmt.Errorf("%w: empty issuer", ErrDiscovery)
 	}
-	if err := requireSecureURL(issuer); err != nil {
+	if err := RequireSecureURL(issuer); err != nil {
 		return Endpoints{}, fmt.Errorf("%w: %v", ErrDiscovery, err)
 	}
 
@@ -98,7 +98,7 @@ func Discover(ctx context.Context, issuer string) (Endpoints, error) {
 		if u == "" {
 			continue
 		}
-		if err := requireSecureURL(u); err != nil {
+		if err := RequireSecureURL(u); err != nil {
 			return Endpoints{}, fmt.Errorf("%w: %v", ErrDiscovery, err)
 		}
 	}
