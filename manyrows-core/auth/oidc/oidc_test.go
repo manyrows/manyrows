@@ -234,6 +234,30 @@ func TestOIDC_RejectsInsecureURLs(t *testing.T) {
 	}
 }
 
+// Many providers return a NUMERIC user id from userinfo (GitHub-style).
+// The subject must be coerced to a string, not dropped.
+func TestOIDC_Authenticate_NumericUserinfoSubject(t *testing.T) {
+	idp := newMockIDP(t)
+	idp.idClaims = nil
+	idp.userinfo = map[string]any{"id": 1234567890123, "email": "numeric@example.com"}
+
+	cfg := oidc.ProviderConfig{
+		Mode: oidc.ModeOAuth2, ClientID: "client-123",
+		AuthorizeURL: idp.issuer() + "/authorize", TokenURL: idp.issuer() + "/token", UserinfoURL: idp.issuer() + "/userinfo",
+		SubjectField: "id",
+	}
+	info, err := oidc.Authenticate(context.Background(), cfg, "code", "https://app/cb", "", "")
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if info.Subject != "1234567890123" {
+		t.Errorf("numeric subject must coerce to string, got %q", info.Subject)
+	}
+	if info.Email != "numeric@example.com" {
+		t.Errorf("email = %q", info.Email)
+	}
+}
+
 func TestOIDC_AuthorizeURL_IncludesPKCEAndNonce(t *testing.T) {
 	idp := newMockIDP(t)
 	cfg := oidc.ProviderConfig{Mode: oidc.ModeOIDC, IssuerURL: idp.issuer(), ClientID: "client-123", Scopes: "openid email"}

@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -369,8 +370,12 @@ func FetchUserinfo(ctx context.Context, userinfoURL, accessToken string, fields 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("userinfo: status %d", resp.StatusCode)
 	}
+	// UseNumber keeps numeric ids exact (a large user id would lose
+	// precision as float64); claimString turns json.Number into a string.
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
 	var m map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("userinfo: decode: %w", err)
 	}
 	sub := claimString(m, fields.subject)
@@ -387,14 +392,26 @@ func FetchUserinfo(ctx context.Context, userinfoURL, accessToken string, fields 
 }
 
 // claimString reads a string-valued claim, tolerating absence.
+// claimString reads a claim as a string, coercing numbers. Providers
+// commonly return a numeric user id (e.g. GitHub-style userinfo
+// {"id": 12345}, or a non-spec numeric `sub`); without coercion the
+// subject would come back empty and the sign-in would fail. json.Number
+// (from a UseNumber-decoded userinfo) is exact; a float64 (from the
+// id_token's MapClaims) is formatted without a trailing ".0".
 func claimString(m map[string]any, key string) string {
 	if key == "" {
 		return ""
 	}
-	if v, ok := m[key].(string); ok {
+	switch v := m[key].(type) {
+	case string:
 		return v
+	case json.Number:
+		return v.String()
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
 	}
-	return ""
 }
 
 // claimBool reads a boolean-ish claim. Providers emit email_verified as
