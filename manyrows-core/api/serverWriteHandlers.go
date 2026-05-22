@@ -274,6 +274,73 @@ func (handler *RequestHandler) ServerReplaceUserRoles(w http.ResponseWriter, r *
 	utils.WriteJson(w, ServerRolesResponse{Roles: slugs})
 }
 
+// serverChangeUserRole is the shared body for the incremental add/remove role
+// endpoints: gate on membership, resolve+validate the {slug}, mutate, then
+// echo the user's resulting roles. add=true grants, add=false revokes.
+func (handler *RequestHandler) serverChangeUserRole(w http.ResponseWriter, r *http.Request, add bool) {
+	ctx := r.Context()
+
+	project, ok := core.ProductFromContext(ctx)
+	if !ok || project == nil {
+		WriteError(w, r, "error.projectNotFound", http.StatusNotFound)
+		return
+	}
+	app, ok := core.AppFromContext(ctx)
+	if !ok || app == nil {
+		WriteError(w, r, "error.appNotFound", http.StatusNotFound)
+		return
+	}
+	userID, ok := handler.userIDFromURL(w, r)
+	if !ok {
+		return
+	}
+	if !handler.requireAppMember(w, r, app.ID, userID) {
+		return
+	}
+
+	// Resolve the single slug through the same validator the replace path
+	// uses — an unknown slug is a 400 before any write.
+	slug := chi.URLParam(r, "slug")
+	roleIDs, _, ok := handler.resolveRoleSlugs(w, r, project.ID, []string{slug})
+	if !ok {
+		return
+	}
+
+	var err error
+	if add {
+		err = handler.repo.AddUserRole(ctx, app.ID, userID, roleIDs[0])
+	} else {
+		err = handler.repo.RemoveUserRole(ctx, app.ID, userID, roleIDs[0])
+	}
+	if err != nil {
+		log.Err(err).Bool("add", add).Msg("serverChangeUserRole: failed")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+
+	// Echo the resulting role set (a read-back, since this is a delta).
+	roles, _, err := handler.resolveRolesAndPermissions(ctx, project.ID, userID, app.ID)
+	if err != nil {
+		log.Err(err).Msg("serverChangeUserRole: resolve roles failed")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+	utils.WriteJson(w, ServerRolesResponse{Roles: roles})
+}
+
+// ServerAddUserRole grants one role to a member (idempotent), without
+// disturbing their other roles. Complements PUT /roles (full replace).
+// POST /x/{workspaceSlug}/api/v1/apps/{appId}/users/{userId}/roles/{slug}
+func (handler *RequestHandler) ServerAddUserRole(w http.ResponseWriter, r *http.Request) {
+	handler.serverChangeUserRole(w, r, true)
+}
+
+// ServerRemoveUserRole revokes one role from a member (idempotent).
+// DELETE /x/{workspaceSlug}/api/v1/apps/{appId}/users/{userId}/roles/{slug}
+func (handler *RequestHandler) ServerRemoveUserRole(w http.ResponseWriter, r *http.Request) {
+	handler.serverChangeUserRole(w, r, false)
+}
+
 type ServerCreateUserRequest struct {
 	Email string `json:"email"`
 	// EmailVerified marks the address as already verified — the customer

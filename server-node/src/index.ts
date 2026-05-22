@@ -366,6 +366,24 @@ export class ManyRowsServer {
     return this.request("PUT", `/users/${encodeURIComponent(userId)}/roles`, { body: { roles } });
   }
 
+  /** Grant one role to a member without disturbing the others (idempotent). Returns the resulting roles. */
+  async addUserRole(userId: string, roleSlug: string): Promise<string[]> {
+    const { roles } = await this.request<{ roles: string[] }>(
+      "POST",
+      `/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleSlug)}`,
+    );
+    return roles;
+  }
+
+  /** Revoke one role from a member (idempotent). Returns the resulting roles. */
+  async removeUserRole(userId: string, roleSlug: string): Promise<string[]> {
+    const { roles } = await this.request<{ roles: string[] }>(
+      "DELETE",
+      `/users/${encodeURIComponent(userId)}/roles/${encodeURIComponent(roleSlug)}`,
+    );
+    return roles;
+  }
+
   /** A member's direct permission overrides (slugs), separate from role-granted permissions. */
   async getUserPermissions(userId: string): Promise<string[]> {
     const { permissions } = await this.request<{ permissions: string[] }>(

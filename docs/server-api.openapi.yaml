@@ -350,6 +350,42 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /apps/{appId}/users/{userId}/roles/{slug}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/UserId"
+      - name: slug
+        in: path
+        required: true
+        description: Role slug.
+        schema: { type: string }
+    post:
+      tags: [Users]
+      summary: Grant one role
+      description: Add a single role without disturbing the user's other roles (idempotent). Returns the resulting role slugs.
+      operationId: addUserRole
+      responses:
+        "200":
+          description: The resulting role slugs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RolesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Users]
+      summary: Revoke one role
+      description: Remove a single role (idempotent). Returns the resulting role slugs.
+      operationId: removeUserRole
+      responses:
+        "200":
+          description: The resulting role slugs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RolesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /apps/{appId}/users/{userId}/permissions:
     parameters:
       - $ref: "#/components/parameters/AppId"

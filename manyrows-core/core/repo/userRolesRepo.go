@@ -310,6 +310,26 @@ func (r *Repo) ReplaceUserRoles(ctx context.Context, p ReplaceUserRolesParams) e
 	return nil
 }
 
+// AddUserRole grants a single role to a user in an app. Idempotent — granting
+// a role the user already has is a no-op. The caller is responsible for
+// ensuring roleID belongs to the app's product (resolveRoleSlugs does this).
+func (r *Repo) AddUserRole(ctx context.Context, appID, userID, roleID uuid.UUID) error {
+	const q = `
+		insert into user_roles (app_id, user_id, role_id, created_at, id)
+		values ($1, $2, $3, $4, gen_random_uuid())
+		on conflict do nothing;
+	`
+	_, err := r.db.Pool().Exec(ctx, q, appID, userID, roleID, time.Now().UTC())
+	return err
+}
+
+// RemoveUserRole revokes a single role from a user in an app. Idempotent.
+func (r *Repo) RemoveUserRole(ctx context.Context, appID, userID, roleID uuid.UUID) error {
+	const q = `delete from user_roles where app_id = $1 and user_id = $2 and role_id = $3;`
+	_, err := r.db.Pool().Exec(ctx, q, appID, userID, roleID)
+	return err
+}
+
 // Optional helper: check if a project exists (useful if you want ErrNotFound when project is invalid).
 func (r *Repo) ProductExists(ctx context.Context, productID uuid.UUID) (bool, error) {
 	const q = `select 1 from products where id = $1`

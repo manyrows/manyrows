@@ -428,6 +428,26 @@ func (c *Client) ReplaceUserRoles(ctx context.Context, userID string, roles []st
 	return out.Roles, c.do(ctx, http.MethodPut, "/users/"+url.PathEscape(userID)+"/roles", nil, body, &out)
 }
 
+// AddUserRole grants one role to a member without disturbing the others
+// (idempotent) and returns the resulting role slugs.
+func (c *Client) AddUserRole(ctx context.Context, userID, roleSlug string) ([]string, error) {
+	var out struct {
+		Roles []string `json:"roles"`
+	}
+	path := "/users/" + url.PathEscape(userID) + "/roles/" + url.PathEscape(roleSlug)
+	return out.Roles, c.do(ctx, http.MethodPost, path, nil, nil, &out)
+}
+
+// RemoveUserRole revokes one role from a member (idempotent) and returns the
+// resulting role slugs.
+func (c *Client) RemoveUserRole(ctx context.Context, userID, roleSlug string) ([]string, error) {
+	var out struct {
+		Roles []string `json:"roles"`
+	}
+	path := "/users/" + url.PathEscape(userID) + "/roles/" + url.PathEscape(roleSlug)
+	return out.Roles, c.do(ctx, http.MethodDelete, path, nil, nil, &out)
+}
+
 // GetUserPermissions lists a member's direct permission overrides (slugs),
 // separate from the permissions inherited via roles.
 func (c *Client) GetUserPermissions(ctx context.Context, userID string) ([]string, error) {

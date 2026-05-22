@@ -178,6 +178,16 @@ class ManyRowsServer:
         )
         return data.get("roles", [])
 
+    def add_user_role(self, user_id: str, role_slug: str) -> list[str]:
+        """Grant one role without disturbing the others (idempotent). Returns the resulting roles."""
+        path = f"/users/{urllib.parse.quote(user_id, safe='')}/roles/{urllib.parse.quote(role_slug, safe='')}"
+        return self._request("POST", path).get("roles", [])
+
+    def remove_user_role(self, user_id: str, role_slug: str) -> list[str]:
+        """Revoke one role (idempotent). Returns the resulting roles."""
+        path = f"/users/{urllib.parse.quote(user_id, safe='')}/roles/{urllib.parse.quote(role_slug, safe='')}"
+        return self._request("DELETE", path).get("roles", [])
+
     def get_user_permissions(self, user_id: str) -> list[str]:
         """A member's direct permission overrides (slugs), separate from role-granted ones."""
         data = self._request("GET", f"/users/{urllib.parse.quote(user_id, safe='')}/permissions")

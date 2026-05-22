@@ -341,6 +341,8 @@ func setupServerAPIRouter(t *testing.T) *chi.Mux {
 	appRouter.Delete("/users/{userId}/sessions", requestHandler.ServerRevokeUserSessions)
 	appRouter.Delete("/users/{userId}/sessions/{sessionId}", requestHandler.ServerRevokeUserSession)
 	appRouter.Put("/users/{userId}/roles", requestHandler.ServerReplaceUserRoles)
+	appRouter.Post("/users/{userId}/roles/{slug}", requestHandler.ServerAddUserRole)
+	appRouter.Delete("/users/{userId}/roles/{slug}", requestHandler.ServerRemoveUserRole)
 	appRouter.Get("/users/{userId}/permissions", requestHandler.ServerGetUserPermissions)
 	appRouter.Put("/users/{userId}/permissions", requestHandler.ServerSetUserPermissions)
 	appRouter.Get("/users/{userId}/auth-logs", requestHandler.ServerGetUserAuthLogs)
@@ -3235,6 +3237,87 @@ func TestServerCreateUser_ReProvisionRoleSemantics(t *testing.T) {
 	}
 	if got := currentRoles(); len(got) != 1 || got[0] != slugB {
 		t.Fatalf("re-provision with empty roles should PRESERVE, got %v", got)
+	}
+}
+
+func TestServerIncrementalUserRoles(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-incrole-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, "DELETE FROM user_roles WHERE app_id = $1", appID)
+		_, _ = pool.Exec(ctx, "DELETE FROM roles WHERE product_id = $1", project.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	slugA := GenerateUniqueSlug("inca")
+	slugB := GenerateUniqueSlug("incb")
+	for _, s := range []string{slugA, slugB} {
+		if _, err := testEnv.Repo.CreateRole(ctx, repo.CreateRoleParams{ProductID: project.ID, Name: s, Slug: s, Now: now}); err != nil {
+			t.Fatalf("CreateRole %s: %v", s, err)
+		}
+	}
+	user, _, err := testEnv.GetOrCreateUserWithMembership(ctx, acc.Email, &core.App{ID: appID}, core.UserSourceInvited)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	defer func() {
+		_, _ = testEnv.DB.Pool().Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+	}()
+
+	base := "/x/" + ws.Slug + "/api/v1/apps/" + appID.String() + "/users/" + user.ID.String() + "/roles"
+	roleSet := func(rr *httptest.ResponseRecorder) map[string]bool {
+		var resp api.ServerRolesResponse
+		_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+		m := map[string]bool{}
+		for _, s := range resp.Roles {
+			m[s] = true
+		}
+		return m
+	}
+	send := func(method, slug string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, httptest.NewRequest(method, base+"/"+slug, nil))
+		return rr
+	}
+
+	// Add A, then B → both present, other roles untouched.
+	if rr := send(http.MethodPost, slugA); rr.Code != http.StatusOK || !roleSet(rr)[slugA] {
+		t.Fatalf("add A: code %d, set %v", rr.Code, roleSet(rr))
+	}
+	if rr := send(http.MethodPost, slugB); rr.Code != http.StatusOK {
+		t.Fatalf("add B: code %d", rr.Code)
+	} else if m := roleSet(rr); len(m) != 2 || !m[slugA] || !m[slugB] {
+		t.Fatalf("after add A,B: want {A,B}, got %v", m)
+	}
+
+	// Remove A → only B remains.
+	if rr := send(http.MethodDelete, slugA); rr.Code != http.StatusOK {
+		t.Fatalf("remove A: code %d", rr.Code)
+	} else if m := roleSet(rr); len(m) != 1 || !m[slugB] {
+		t.Fatalf("after remove A: want {B}, got %v", m)
+	}
+
+	// Re-add B → idempotent (no duplicate).
+	if rr := send(http.MethodPost, slugB); rr.Code != http.StatusOK {
+		t.Fatalf("re-add B: code %d", rr.Code)
+	} else if m := roleSet(rr); len(m) != 1 || !m[slugB] {
+		t.Fatalf("idempotent re-add B: want {B}, got %v", m)
+	}
+
+	// Unknown slug → 400.
+	if rr := send(http.MethodPost, "no-such-role"); rr.Code != http.StatusBadRequest {
+		t.Fatalf("unknown role: expected 400, got %d", rr.Code)
 	}
 }
 
