@@ -112,6 +112,7 @@ var apiTranslations = map[string]map[string]string{
 		// Auth method errors
 		"error.noSignInMethodEnabled":           "At least one sign-in method must remain enabled. Turn on a sign-in method (email, Google, Apple, Microsoft, or GitHub) before disabling the others.",
 		"error.authMethodDisabled":              "This sign-in method is not enabled for this app.",
+		"error.magicLinkRequiresAppUrl":         "Magic-link sign-in requires the app to have an App URL configured.",
 		"error.googleClientIdRequired":          "A Google OAuth Client ID is required to enable Google sign-in.",
 		"error.appleConfigIncomplete":           "Configure all four Apple credential fields (Services ID, Team ID, Key ID, .p8 key) before enabling.",
 		"error.appleKeyInvalid":                 "The Apple .p8 private key is not a valid PKCS8 EC key.",
