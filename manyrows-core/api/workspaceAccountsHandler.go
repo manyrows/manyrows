@@ -495,6 +495,10 @@ func (handler *RequestHandler) HandleBulkImportWorkspaceAccounts(w http.Response
 
 		if created {
 			imported++
+			// Match the single-create path (and S2S): notify integrations of
+			// each new identity. dispatchWebhook is fire-and-forget, and an
+			// app with no webhooks (the common case) makes this nearly free.
+			handler.dispatchWebhook(bulkApp.ID, "user.created", map[string]any{"userId": bulkUser.ID, "email": email, "appId": bulkApp.ID})
 		} else {
 			skipped++
 		}
