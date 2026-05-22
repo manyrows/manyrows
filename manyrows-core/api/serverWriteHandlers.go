@@ -297,7 +297,14 @@ type ServerCreateUserResponse struct {
 // ServerCreateUser provisions a user into the app's pool and adds them to the
 // app. The pool is the identity boundary, so an existing user with the same
 // email in the pool is reused (created=false) and ensured to be a member —
-// the call is idempotent. Optional roles are assigned and echoed back.
+// the call is idempotent.
+//
+// Role semantics on re-provision: a non-empty `roles` list REPLACES the user's
+// roles in this app; omitting `roles` (or sending []) PRESERVES existing roles
+// — so a roleless re-invite never silently strips a member's roles. Use
+// PUT /users/{userId}/roles to authoritatively clear them. The response's
+// `roles` echoes what this call set (the resolved input), not necessarily the
+// user's full current set.
 // POST /x/{workspaceSlug}/api/v1/apps/{appId}/users
 func (handler *RequestHandler) ServerCreateUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

@@ -172,6 +172,19 @@ VALUES ($1, $2, $3, $4, $5, $6, $7);
 	if _, err := r.db.Pool().Exec(ctx, q,
 		u.ID, u.Email, u.Enabled, u.Source, u.UserPoolID, u.CreatedAt, u.UpdatedAt,
 	); err != nil {
+		// Lost a concurrent-create race: another call inserted the same
+		// (email, pool) between our existence check and this insert. The
+		// unique index rejects us with 23505 — re-read and return the now-
+		// existing row idempotently rather than surfacing a 500.
+		if IsUniqueViolation(err) {
+			existing, gerr := r.GetUserByEmail(ctx, email, app)
+			if gerr != nil {
+				return nil, false, gerr
+			}
+			if existing != nil {
+				return existing, false, nil
+			}
+		}
 		return nil, false, err
 	}
 	return u, true, nil

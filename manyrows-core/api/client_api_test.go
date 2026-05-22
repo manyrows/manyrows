@@ -3164,6 +3164,80 @@ func TestServerWebhookCRUD(t *testing.T) {
 	}
 }
 
+// TestServerCreateUser_ReProvisionRoleSemantics pins the documented behavior:
+// re-provisioning with a non-empty roles list REPLACES the user's roles, while
+// omitting roles PRESERVES them (so a roleless re-invite doesn't strip roles).
+func TestServerCreateUser_ReProvisionRoleSemantics(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-reprov-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	emailAddr := "reprov-" + GenerateUniqueSlug("u") + "@example.com"
+	defer func() {
+		pool := testEnv.DB.Pool()
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, "DELETE FROM user_roles WHERE app_id = $1", appID)
+		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE lower(email) = lower($1)", emailAddr)
+		_, _ = pool.Exec(ctx, "DELETE FROM roles WHERE product_id = $1", project.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	slugA := GenerateUniqueSlug("rolea")
+	slugB := GenerateUniqueSlug("roleb")
+	if _, err := testEnv.Repo.CreateRole(ctx, repo.CreateRoleParams{ProductID: project.ID, Name: "RoleA", Slug: slugA, Now: now}); err != nil {
+		t.Fatalf("CreateRole A: %v", err)
+	}
+	if _, err := testEnv.Repo.CreateRole(ctx, repo.CreateRoleParams{ProductID: project.ID, Name: "RoleB", Slug: slugB, Now: now}); err != nil {
+		t.Fatalf("CreateRole B: %v", err)
+	}
+
+	base := "/x/" + ws.Slug + "/api/v1/apps/" + appID.String() + "/users"
+	provision := func(roles []string) int {
+		body, _ := json.Marshal(api.ServerCreateUserRequest{Email: emailAddr, Roles: roles})
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, base, bytes.NewReader(body)))
+		return rr.Code
+	}
+	currentRoles := func() []string {
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, base+"?email="+url.QueryEscape(emailAddr), nil))
+		var u api.ServerUserResponse
+		_ = json.Unmarshal(rr.Body.Bytes(), &u)
+		return u.Roles
+	}
+
+	// Initial provision with roleA.
+	if code := provision([]string{slugA}); code != http.StatusCreated {
+		t.Fatalf("initial provision: expected 201, got %d", code)
+	}
+	if got := currentRoles(); len(got) != 1 || got[0] != slugA {
+		t.Fatalf("after initial: want [%s], got %v", slugA, got)
+	}
+
+	// Re-provision with roleB → replaces.
+	if code := provision([]string{slugB}); code != http.StatusOK {
+		t.Fatalf("re-provision (replace): expected 200, got %d", code)
+	}
+	if got := currentRoles(); len(got) != 1 || got[0] != slugB {
+		t.Fatalf("re-provision with roles should REPLACE: want [%s], got %v", slugB, got)
+	}
+
+	// Re-provision with no roles → preserves.
+	if code := provision(nil); code != http.StatusOK {
+		t.Fatalf("re-provision (preserve): expected 200, got %d", code)
+	}
+	if got := currentRoles(); len(got) != 1 || got[0] != slugB {
+		t.Fatalf("re-provision with empty roles should PRESERVE, got %v", got)
+	}
+}
+
 // =====================
 // Server API magic-link tests
 // =====================
