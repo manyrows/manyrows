@@ -334,6 +334,12 @@ func setupServerAPIRouter(t *testing.T) *chi.Mux {
 	appRouter.Delete("/config/{configKey}", requestHandler.ServerDeleteConfigValue)
 	appRouter.Put("/features/{flagKey}", requestHandler.ServerSetFeatureFlag)
 	appRouter.Delete("/features/{flagKey}", requestHandler.ServerDeleteFeatureFlag)
+	appRouter.Post("/config-keys", requestHandler.ServerCreateConfigKey)
+	appRouter.Patch("/config-keys/{key}", requestHandler.ServerUpdateConfigKey)
+	appRouter.Delete("/config-keys/{key}", requestHandler.ServerDeleteConfigKey)
+	appRouter.Post("/feature-flags", requestHandler.ServerCreateFeatureFlagDef)
+	appRouter.Patch("/feature-flags/{key}", requestHandler.ServerUpdateFeatureFlagDef)
+	appRouter.Delete("/feature-flags/{key}", requestHandler.ServerDeleteFeatureFlagDef)
 	appRouter.Get("/users", requestHandler.HandleServerGetUser)
 	appRouter.Get("/users/{userId}", requestHandler.ServerGetUserByID)
 	appRouter.Post("/users", requestHandler.ServerCreateUser)
@@ -3544,6 +3550,89 @@ func TestServerRbacCrud(t *testing.T) {
 	}
 	if rr := send(http.MethodDelete, "/permissions/posts:write", ""); rr.Code != http.StatusNoContent {
 		t.Fatalf("delete perm: %d", rr.Code)
+	}
+}
+
+func TestServerConfigDefCrud(t *testing.T) {
+	router := setupServerAPIRouter(t)
+
+	acc := testEnv.CreateTestAccount(t, "srv-cfgdef-"+GenerateUniqueSlug("test")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, acc, "Test WS", GenerateUniqueSlug("ws"))
+	project := testEnv.CreateTestProduct(t, ws, acc, "Test Product", GenerateUniqueSlug("proj"))
+	appID := createTestApp(t, ws.ID, project.ID, uuid.Nil, "Test App")
+
+	fixtures := &TestFixtures{Account: acc, Workspace: ws, Products: []core.Product{*project}}
+	defer testEnv.CleanupTestData(t, fixtures)
+	defer func() {
+		pool := testEnv.DB.Pool()
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, "DELETE FROM config_keys WHERE product_id = $1", project.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM feature_flags WHERE product_id = $1", project.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM apps WHERE id = $1", appID)
+	}()
+
+	base := "/x/" + ws.Slug + "/api/v1/apps/" + appID.String()
+	send := func(method, path, body string) *httptest.ResponseRecorder {
+		var rdr *bytes.Reader
+		if body != "" {
+			rdr = bytes.NewReader([]byte(body))
+		} else {
+			rdr = bytes.NewReader(nil)
+		}
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, httptest.NewRequest(method, base+path, rdr))
+		return rr
+	}
+
+	// --- config keys ---
+	rr := send(http.MethodPost, "/config-keys", `{"key":"GREETING","exposure":"public","valueType":"string","description":"hi"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create config key: %d %s", rr.Code, rr.Body.String())
+	}
+	var ck api.ServerConfigKey
+	_ = json.Unmarshal(rr.Body.Bytes(), &ck)
+	if ck.Key != "GREETING" || ck.Exposure != "public" || ck.ValueType != "string" {
+		t.Fatalf("created config key mismatch: %+v", ck)
+	}
+	if rr := send(http.MethodPost, "/config-keys", `{"key":"GREETING","exposure":"public","valueType":"string"}`); rr.Code != http.StatusConflict {
+		t.Fatalf("dup config key: expected 409, got %d", rr.Code)
+	}
+	if rr := send(http.MethodPost, "/config-keys", `{"key":"BAD","exposure":"nope","valueType":"string"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad exposure: expected 400, got %d", rr.Code)
+	}
+	if rr := send(http.MethodPost, "/config-keys", `{"key":"BAD","exposure":"public","valueType":"weird"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad valueType: expected 400, got %d", rr.Code)
+	}
+	if rr := send(http.MethodPatch, "/config-keys/GREETING", `{"description":"updated"}`); rr.Code != http.StatusOK {
+		t.Fatalf("update config key: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := send(http.MethodDelete, "/config-keys/GREETING", ""); rr.Code != http.StatusNoContent {
+		t.Fatalf("delete config key: %d", rr.Code)
+	}
+
+	// --- feature flags ---
+	rr = send(http.MethodPost, "/feature-flags", `{"key":"new_ui","scope":"client","defaultEnabled":false,"description":"d"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create flag: %d %s", rr.Code, rr.Body.String())
+	}
+	var ff api.ServerFeatureFlagDef
+	_ = json.Unmarshal(rr.Body.Bytes(), &ff)
+	if ff.Key != "new_ui" || ff.Scope != "client" {
+		t.Fatalf("created flag mismatch: %+v", ff)
+	}
+	if rr := send(http.MethodPost, "/feature-flags", `{"key":"bad","scope":"nope"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad scope: expected 400, got %d", rr.Code)
+	}
+	rr = send(http.MethodPatch, "/feature-flags/new_ui", `{"defaultEnabled":true}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update flag: %d %s", rr.Code, rr.Body.String())
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &ff)
+	if !ff.DefaultEnabled {
+		t.Fatalf("flag defaultEnabled should be true, got %+v", ff)
+	}
+	if rr := send(http.MethodDelete, "/feature-flags/new_ui", ""); rr.Code != http.StatusNoContent {
+		t.Fatalf("delete flag: %d", rr.Code)
 	}
 }
 

@@ -206,6 +206,22 @@ export interface Webhook {
   createdBy: string;
 }
 
+export interface ConfigKey {
+  key: string;
+  exposure: "public" | "private" | "secret";
+  valueType: string;
+  status: string;
+  description?: string;
+}
+
+export interface FeatureFlag {
+  key: string;
+  scope: "server" | "client";
+  defaultEnabled: boolean;
+  status: string;
+  description?: string;
+}
+
 export interface UserField {
   id: string;
   userPoolId: string;
@@ -601,7 +617,7 @@ export class ManyRowsServer {
   }
 
   /** Set this app's feature-flag override, optionally targeting role slugs. */
-  setFeatureFlag(flagKey: string, enabled: boolean, roles?: string[]): Promise<void> {
+  setFeatureFlagOverride(flagKey: string, enabled: boolean, roles?: string[]): Promise<void> {
     return this.request("PUT", `/features/${encodeURIComponent(flagKey)}`, {
       body: { enabled, roles },
       expectNoContent: true,
@@ -609,8 +625,46 @@ export class ManyRowsServer {
   }
 
   /** Clear this app's feature-flag override (falls back to the flag's default). */
-  deleteFeatureFlag(flagKey: string): Promise<void> {
+  clearFeatureFlagOverride(flagKey: string): Promise<void> {
     return this.request("DELETE", `/features/${encodeURIComponent(flagKey)}`, { expectNoContent: true });
+  }
+
+  // ---- config-key & feature-flag DEFINITIONS (the schema; values/overrides above) ----
+
+  /** Define a config key. */
+  createConfigKey(input: { key: string; exposure: "public" | "private" | "secret"; valueType: string; description?: string }): Promise<ConfigKey> {
+    return this.request("POST", "/config-keys", { body: input });
+  }
+
+  /** Update a config key's metadata. */
+  updateConfigKey(
+    key: string,
+    patch: { description?: string; exposure?: "public" | "private" | "secret"; valueType?: string; status?: "active" | "archived" },
+  ): Promise<ConfigKey> {
+    return this.request("PATCH", `/config-keys/${encodeURIComponent(key)}`, { body: patch });
+  }
+
+  /** Delete a config key (and its per-app values). */
+  deleteConfigKey(key: string): Promise<void> {
+    return this.request("DELETE", `/config-keys/${encodeURIComponent(key)}`, { expectNoContent: true });
+  }
+
+  /** Define a feature flag. */
+  createFeatureFlag(input: { key: string; scope: "server" | "client"; defaultEnabled?: boolean; description?: string }): Promise<FeatureFlag> {
+    return this.request("POST", "/feature-flags", { body: input });
+  }
+
+  /** Update a feature flag's metadata. */
+  updateFeatureFlag(
+    key: string,
+    patch: { description?: string; scope?: "server" | "client"; defaultEnabled?: boolean; status?: "active" | "archived" },
+  ): Promise<FeatureFlag> {
+    return this.request("PATCH", `/feature-flags/${encodeURIComponent(key)}`, { body: patch });
+  }
+
+  /** Delete a feature flag (and its per-app overrides). */
+  deleteFeatureFlag(key: string): Promise<void> {
+    return this.request("DELETE", `/feature-flags/${encodeURIComponent(key)}`, { expectNoContent: true });
   }
 
   /** Reset (disable) a member's 2FA — for a user who lost their authenticator. */

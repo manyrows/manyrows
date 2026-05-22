@@ -273,7 +273,7 @@ paths:
       tags: [Config and flags]
       summary: Set a feature-flag override
       description: Enable/disable a flag for this app, optionally targeting a set of role slugs.
-      operationId: setFeatureFlag
+      operationId: setFeatureFlagOverride
       requestBody:
         required: true
         content:
@@ -287,9 +287,127 @@ paths:
       tags: [Config and flags]
       summary: Clear a feature-flag override
       description: Removes the override so the flag falls back to its default.
-      operationId: deleteFeatureFlag
+      operationId: clearFeatureFlagOverride
       responses:
         "204": { description: Cleared (idempotent). }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/config-keys:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    post:
+      tags: [Config and flags]
+      summary: Define a config key
+      description: Create a config key (the schema). Per-app values are set via PUT /config/{key}.
+      operationId: createConfigKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateConfigKeyRequest" }
+      responses:
+        "201":
+          description: The created config key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigKeyDef" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: A config key with that key already exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /apps/{appId}/config-keys/{key}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [Config and flags]
+      summary: Update a config key
+      operationId: updateConfigKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateConfigKeyRequest" }
+      responses:
+        "200":
+          description: The updated config key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigKeyDef" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Config and flags]
+      summary: Delete a config key
+      description: Deletes the key and its per-app values.
+      operationId: deleteConfigKey
+      responses:
+        "204": { description: Deleted. }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/feature-flags:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    post:
+      tags: [Config and flags]
+      summary: Define a feature flag
+      description: Create a feature flag (the schema). Per-app overrides are set via PUT /features/{key}.
+      operationId: createFeatureFlag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateFeatureFlagDefRequest" }
+      responses:
+        "201":
+          description: The created feature flag.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeatureFlagDef" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: A feature flag with that key already exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /apps/{appId}/feature-flags/{key}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [Config and flags]
+      summary: Update a feature flag
+      operationId: updateFeatureFlag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateFeatureFlagDefRequest" }
+      responses:
+        "200":
+          description: The updated feature flag.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeatureFlagDef" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Config and flags]
+      summary: Delete a feature flag
+      description: Deletes the flag and its per-app overrides.
+      operationId: deleteFeatureFlag
+      responses:
+        "204": { description: Deleted. }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /apps/{appId}/users:
@@ -1199,6 +1317,58 @@ components:
           type: array
           items: { type: string }
           description: Optional role slugs to target; empty/omitted applies to everyone.
+
+    ConfigKeyDef:
+      type: object
+      properties:
+        key: { type: string }
+        exposure: { type: string, enum: [public, private, secret] }
+        valueType: { type: string, description: "string | int | decimal | bool | string[] | … | json" }
+        status: { type: string, enum: [active, archived] }
+        description: { type: string }
+
+    CreateConfigKeyRequest:
+      type: object
+      required: [key, exposure, valueType]
+      properties:
+        key: { type: string }
+        exposure: { type: string, enum: [public, private, secret] }
+        valueType: { type: string }
+        description: { type: string }
+
+    UpdateConfigKeyRequest:
+      type: object
+      properties:
+        description: { type: string }
+        exposure: { type: string, enum: [public, private, secret] }
+        valueType: { type: string }
+        status: { type: string, enum: [active, archived] }
+
+    FeatureFlagDef:
+      type: object
+      properties:
+        key: { type: string }
+        scope: { type: string, enum: [server, client] }
+        defaultEnabled: { type: boolean }
+        status: { type: string, enum: [active, archived] }
+        description: { type: string }
+
+    CreateFeatureFlagDefRequest:
+      type: object
+      required: [key, scope]
+      properties:
+        key: { type: string }
+        scope: { type: string, enum: [server, client] }
+        defaultEnabled: { type: boolean }
+        description: { type: string }
+
+    UpdateFeatureFlagDefRequest:
+      type: object
+      properties:
+        description: { type: string }
+        scope: { type: string, enum: [server, client] }
+        defaultEnabled: { type: boolean }
+        status: { type: string, enum: [active, archived] }
 
     PermissionsListResponse:
       type: object

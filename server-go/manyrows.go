@@ -713,9 +713,9 @@ func (c *Client) DeleteConfigValue(ctx context.Context, configKey string) error 
 	return c.do(ctx, http.MethodDelete, "/config/"+url.PathEscape(configKey), nil, nil, nil)
 }
 
-// SetFeatureFlag sets this app's override for a feature flag, optionally
+// SetFeatureFlagOverride sets this app's override for a feature flag, optionally
 // targeting a set of role slugs (nil/empty applies to everyone).
-func (c *Client) SetFeatureFlag(ctx context.Context, flagKey string, enabled bool, roles []string) error {
+func (c *Client) SetFeatureFlagOverride(ctx context.Context, flagKey string, enabled bool, roles []string) error {
 	body := map[string]any{"enabled": enabled}
 	if roles != nil {
 		body["roles"] = roles
@@ -723,9 +723,94 @@ func (c *Client) SetFeatureFlag(ctx context.Context, flagKey string, enabled boo
 	return c.do(ctx, http.MethodPut, "/features/"+url.PathEscape(flagKey), nil, body, nil)
 }
 
-// DeleteFeatureFlag clears this app's override for a flag (falls back to default).
-func (c *Client) DeleteFeatureFlag(ctx context.Context, flagKey string) error {
+// ClearFeatureFlagOverride clears this app's override for a flag (falls back to default).
+func (c *Client) ClearFeatureFlagOverride(ctx context.Context, flagKey string) error {
 	return c.do(ctx, http.MethodDelete, "/features/"+url.PathEscape(flagKey), nil, nil, nil)
+}
+
+// ---- config-key & feature-flag DEFINITIONS (the schema; values/overrides above) ----
+
+type ConfigKey struct {
+	Key         string `json:"key"`
+	Exposure    string `json:"exposure"`
+	ValueType   string `json:"valueType"`
+	Status      string `json:"status"`
+	Description string `json:"description,omitempty"`
+}
+
+type FeatureFlag struct {
+	Key            string `json:"key"`
+	Scope          string `json:"scope"`
+	DefaultEnabled bool   `json:"defaultEnabled"`
+	Status         string `json:"status"`
+	Description    string `json:"description,omitempty"`
+}
+
+// ConfigKeyInput defines a config key. Exposure is public|private|secret;
+// ValueType is string|int|decimal|bool (+ []) | json.
+type ConfigKeyInput struct {
+	Key         string `json:"key"`
+	Exposure    string `json:"exposure"`
+	ValueType   string `json:"valueType"`
+	Description string `json:"description,omitempty"`
+}
+
+// ConfigKeyUpdate patches a config key; nil fields are left unchanged.
+type ConfigKeyUpdate struct {
+	Description *string `json:"description,omitempty"`
+	Exposure    *string `json:"exposure,omitempty"`
+	ValueType   *string `json:"valueType,omitempty"`
+	Status      *string `json:"status,omitempty"`
+}
+
+// FeatureFlagInput defines a feature flag. Scope is server|client.
+type FeatureFlagInput struct {
+	Key            string `json:"key"`
+	Scope          string `json:"scope"`
+	DefaultEnabled bool   `json:"defaultEnabled,omitempty"`
+	Description    string `json:"description,omitempty"`
+}
+
+// FeatureFlagUpdate patches a feature flag; nil fields are left unchanged.
+type FeatureFlagUpdate struct {
+	Description    *string `json:"description,omitempty"`
+	Scope          *string `json:"scope,omitempty"`
+	DefaultEnabled *bool   `json:"defaultEnabled,omitempty"`
+	Status         *string `json:"status,omitempty"`
+}
+
+// CreateConfigKey defines a config key.
+func (c *Client) CreateConfigKey(ctx context.Context, in ConfigKeyInput) (*ConfigKey, error) {
+	var out ConfigKey
+	return &out, c.do(ctx, http.MethodPost, "/config-keys", nil, in, &out)
+}
+
+// UpdateConfigKey updates a config key's metadata.
+func (c *Client) UpdateConfigKey(ctx context.Context, key string, patch ConfigKeyUpdate) (*ConfigKey, error) {
+	var out ConfigKey
+	return &out, c.do(ctx, http.MethodPatch, "/config-keys/"+url.PathEscape(key), nil, patch, &out)
+}
+
+// DeleteConfigKey deletes a config key and its per-app values.
+func (c *Client) DeleteConfigKey(ctx context.Context, key string) error {
+	return c.do(ctx, http.MethodDelete, "/config-keys/"+url.PathEscape(key), nil, nil, nil)
+}
+
+// CreateFeatureFlag defines a feature flag.
+func (c *Client) CreateFeatureFlag(ctx context.Context, in FeatureFlagInput) (*FeatureFlag, error) {
+	var out FeatureFlag
+	return &out, c.do(ctx, http.MethodPost, "/feature-flags", nil, in, &out)
+}
+
+// UpdateFeatureFlag updates a feature flag's metadata.
+func (c *Client) UpdateFeatureFlag(ctx context.Context, key string, patch FeatureFlagUpdate) (*FeatureFlag, error) {
+	var out FeatureFlag
+	return &out, c.do(ctx, http.MethodPatch, "/feature-flags/"+url.PathEscape(key), nil, patch, &out)
+}
+
+// DeleteFeatureFlag deletes a feature flag and its per-app overrides.
+func (c *Client) DeleteFeatureFlag(ctx context.Context, key string) error {
+	return c.do(ctx, http.MethodDelete, "/feature-flags/"+url.PathEscape(key), nil, nil, nil)
 }
 
 // ResetUserTOTP disables a member's 2FA (for a user who lost their authenticator).

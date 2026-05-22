@@ -19,6 +19,8 @@ from .models import (
     RoleSummary,
     AuthLogsPage,
     BatchUserResult,
+    ConfigKey,
+    FeatureFlag,
     Identity,
     Passkey,
     ServerUser,
@@ -392,16 +394,82 @@ class ManyRowsServer:
         """Clear this app's value for a config key."""
         self._request("DELETE", f"/config/{urllib.parse.quote(config_key, safe='')}")
 
-    def set_feature_flag(self, flag_key: str, enabled: bool, roles: Optional[list[str]] = None) -> None:
+    def set_feature_flag_override(self, flag_key: str, enabled: bool, roles: Optional[list[str]] = None) -> None:
         """Set this app's feature-flag override, optionally targeting role slugs."""
         body: dict[str, Any] = {"enabled": enabled}
         if roles is not None:
             body["roles"] = roles
         self._request("PUT", f"/features/{urllib.parse.quote(flag_key, safe='')}", body=body)
 
-    def delete_feature_flag(self, flag_key: str) -> None:
+    def clear_feature_flag_override(self, flag_key: str) -> None:
         """Clear this app's feature-flag override (falls back to the flag's default)."""
         self._request("DELETE", f"/features/{urllib.parse.quote(flag_key, safe='')}")
+
+    # ---- config-key & feature-flag DEFINITIONS (the schema; values/overrides above) ----
+
+    def create_config_key(self, *, key: str, exposure: str, value_type: str, description: Optional[str] = None) -> ConfigKey:
+        """Define a config key (exposure: public|private|secret; value_type: string|int|bool|...)."""
+        body: dict[str, Any] = {"key": key, "exposure": exposure, "valueType": value_type}
+        if description is not None:
+            body["description"] = description
+        return from_dict(ConfigKey, self._request("POST", "/config-keys", body=body))
+
+    def update_config_key(
+        self,
+        key: str,
+        *,
+        description: Optional[str] = None,
+        exposure: Optional[str] = None,
+        value_type: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> ConfigKey:
+        """Update a config key's metadata (omit a field to leave it unchanged)."""
+        body: dict[str, Any] = {}
+        if description is not None:
+            body["description"] = description
+        if exposure is not None:
+            body["exposure"] = exposure
+        if value_type is not None:
+            body["valueType"] = value_type
+        if status is not None:
+            body["status"] = status
+        return from_dict(ConfigKey, self._request("PATCH", f"/config-keys/{urllib.parse.quote(key, safe='')}", body=body))
+
+    def delete_config_key(self, key: str) -> None:
+        """Delete a config key and its per-app values."""
+        self._request("DELETE", f"/config-keys/{urllib.parse.quote(key, safe='')}")
+
+    def create_feature_flag(self, *, key: str, scope: str, default_enabled: bool = False, description: Optional[str] = None) -> FeatureFlag:
+        """Define a feature flag (scope: server|client)."""
+        body: dict[str, Any] = {"key": key, "scope": scope, "defaultEnabled": default_enabled}
+        if description is not None:
+            body["description"] = description
+        return from_dict(FeatureFlag, self._request("POST", "/feature-flags", body=body))
+
+    def update_feature_flag(
+        self,
+        key: str,
+        *,
+        description: Optional[str] = None,
+        scope: Optional[str] = None,
+        default_enabled: Optional[bool] = None,
+        status: Optional[str] = None,
+    ) -> FeatureFlag:
+        """Update a feature flag's metadata (omit a field to leave it unchanged)."""
+        body: dict[str, Any] = {}
+        if description is not None:
+            body["description"] = description
+        if scope is not None:
+            body["scope"] = scope
+        if default_enabled is not None:
+            body["defaultEnabled"] = default_enabled
+        if status is not None:
+            body["status"] = status
+        return from_dict(FeatureFlag, self._request("PATCH", f"/feature-flags/{urllib.parse.quote(key, safe='')}", body=body))
+
+    def delete_feature_flag(self, key: str) -> None:
+        """Delete a feature flag and its per-app overrides."""
+        self._request("DELETE", f"/feature-flags/{urllib.parse.quote(key, safe='')}")
 
     def reset_user_totp(self, user_id: str) -> None:
         """Reset (disable) a member's 2FA — for a user who lost their authenticator."""

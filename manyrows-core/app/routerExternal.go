@@ -186,6 +186,13 @@ func (a *AppService) serverAPIRouter(h *api.RequestHandler) *chi.Mux {
 	appRouter.Delete("/config/{configKey}", h.ServerDeleteConfigValue)
 	appRouter.Put("/features/{flagKey}", h.ServerSetFeatureFlag)
 	appRouter.Delete("/features/{flagKey}", h.ServerDeleteFeatureFlag)
+	// Config-key + feature-flag DEFINITION management (the schema itself).
+	appRouter.Post("/config-keys", h.ServerCreateConfigKey)
+	appRouter.Patch("/config-keys/{key}", h.ServerUpdateConfigKey)
+	appRouter.Delete("/config-keys/{key}", h.ServerDeleteConfigKey)
+	appRouter.Post("/feature-flags", h.ServerCreateFeatureFlagDef)
+	appRouter.Patch("/feature-flags/{key}", h.ServerUpdateFeatureFlagDef)
+	appRouter.Delete("/feature-flags/{key}", h.ServerDeleteFeatureFlagDef)
 
 	// User fields (app-scoped). Schema is read-only; values can be read
 	// and written per user (handlers pool-scope every userId).

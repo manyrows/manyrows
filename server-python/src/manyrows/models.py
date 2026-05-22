@@ -185,6 +185,24 @@ class Webhook:
 
 
 @dataclass
+class ConfigKey:
+    key: str = ""
+    exposure: str = ""
+    value_type: str = ""
+    status: str = ""
+    description: str = ""
+
+
+@dataclass
+class FeatureFlag:
+    key: str = ""
+    scope: str = ""
+    default_enabled: bool = False
+    status: str = ""
+    description: str = ""
+
+
+@dataclass
 class UserField:
     id: str = ""
     user_pool_id: str = ""

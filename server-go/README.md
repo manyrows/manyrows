@@ -93,7 +93,9 @@ if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
 | `SetUserFieldValue(ctx, fieldID, userID, value)` | `PUT /user-fields/{fieldId}/users/{id}` |
 | `DeleteUserFieldValue(ctx, fieldID, userID)` | `DELETE /user-fields/{fieldId}/users/{id}` |
 | `SetConfigValue(ctx, configKey, value)` / `DeleteConfigValue(ctx, configKey)` | `PUT` · `DELETE /config/{key}` |
-| `SetFeatureFlag(ctx, flagKey, enabled, roles)` / `DeleteFeatureFlag(ctx, flagKey)` | `PUT` · `DELETE /features/{key}` |
+| `SetFeatureFlagOverride(ctx, flagKey, enabled, roles)` / `ClearFeatureFlagOverride(ctx, flagKey)` | `PUT` · `DELETE /features/{key}` |
+| `CreateConfigKey` / `UpdateConfigKey` / `DeleteConfigKey` | `POST /config-keys` · `PATCH`·`DELETE /config-keys/{key}` |
+| `CreateFeatureFlag` / `UpdateFeatureFlag` / `DeleteFeatureFlag` | `POST /feature-flags` · `PATCH`·`DELETE /feature-flags/{key}` |
 | `ResetUserTOTP(ctx, userID)` / `UnlockUser(ctx, userID)` | `DELETE /users/{id}/totp` · `POST .../unlock` |
 | `ListUserIdentities(ctx, userID)` / `DeleteUserIdentity(ctx, userID, provider)` | `GET` · `DELETE /users/{id}/identities[/{provider}]` |
 | `ListUserPasskeys(ctx, userID)` / `DeleteUserPasskey(ctx, userID, passkeyID)` | `GET` · `DELETE /users/{id}/passkeys[/{pid}]` |
