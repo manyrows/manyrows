@@ -337,6 +337,12 @@ func (a *AppService) initRouter() error {
 			// Account recovery (support ops)
 			r.Delete("/users/{userId}/totp", requestHandler.HandleAdminResetUserTOTP)
 			r.Post("/users/{userId}/unlock", requestHandler.HandleAdminUnlockUser)
+
+			// Parity with the S2S API for support operations on a user.
+			r.Post("/users/{userId}/magic-link", requestHandler.HandleAdminCreateMagicLink)
+			r.Put("/users/{userId}/password", requestHandler.HandleAdminSetUserPassword)
+			r.Put("/users/{userId}/email-verified", requestHandler.HandleAdminSetUserEmailVerified)
+			r.Get("/users/{userId}/check-permission", requestHandler.HandleAdminCheckUserPermission)
 		})
 	})
 
