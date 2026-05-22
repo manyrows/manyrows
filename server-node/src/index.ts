@@ -322,10 +322,20 @@ export class ManyRowsServer {
     return roles;
   }
 
+  /** Fetch one role (with its permission slugs) by slug. */
+  getRole(slug: string): Promise<RoleSummary> {
+    return this.request("GET", `/roles/${encodeURIComponent(slug)}`);
+  }
+
   /** The product's permissions. */
   async listPermissions(): Promise<PermissionSummary[]> {
     const { permissions } = await this.request<{ permissions: PermissionSummary[] }>("GET", "/permissions");
     return permissions;
+  }
+
+  /** Fetch one permission by slug. */
+  getPermission(slug: string): Promise<PermissionSummary> {
+    return this.request("GET", `/permissions/${encodeURIComponent(slug)}`);
   }
 
   /** Define a new role, optionally with permission slugs. */

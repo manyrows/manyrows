@@ -105,6 +105,11 @@ func (handler *RequestHandler) ServerCreateRole(w http.ResponseWriter, r *http.R
 			ProductID: project.ID, RoleID: role.ID, PermissionIDs: permIDs, Now: time.Now().UTC(),
 		}); err != nil {
 			log.Err(err).Msg("ServerCreateRole: ReplaceRolePermissions failed")
+			// Don't leave a half-created role with no permissions — roll back the
+			// role so a retry of POST /roles starts clean instead of 409-ing.
+			if delErr := handler.repo.DeleteRole(r.Context(), project.ID, role.ID); delErr != nil {
+				log.Err(delErr).Msg("ServerCreateRole: orphan role cleanup failed")
+			}
 			WriteError(w, r, "error.internalError", http.StatusInternalServerError)
 			return
 		}
@@ -117,6 +122,26 @@ func (handler *RequestHandler) ServerCreateRole(w http.ResponseWriter, r *http.R
 		return
 	}
 	utils.WriteJsonWithStatusCode(w, summary, http.StatusCreated)
+}
+
+// ServerGetRole fetches one role (with its permission slugs) by slug.
+// GET /x/{workspaceSlug}/api/v1/apps/{appId}/roles/{slug}
+func (handler *RequestHandler) ServerGetRole(w http.ResponseWriter, r *http.Request) {
+	project, ok := handler.serverProductCtx(w, r)
+	if !ok {
+		return
+	}
+	summary, found, err := handler.serverRoleSummary(r, project.ID, chi.URLParam(r, "slug"))
+	if err != nil {
+		log.Err(err).Msg("ServerGetRole: failed")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		WriteError(w, r, "error.notFound", http.StatusNotFound)
+		return
+	}
+	utils.WriteJson(w, summary)
 }
 
 // ServerUpdateRole updates a role's name and/or its granted permissions.
@@ -210,6 +235,29 @@ type ServerCreatePermissionRequest struct {
 
 type ServerUpdatePermissionRequest struct {
 	Name *string `json:"name"`
+}
+
+// ServerGetPermission fetches one permission by slug.
+// GET /x/{workspaceSlug}/api/v1/apps/{appId}/permissions/{slug}
+func (handler *RequestHandler) ServerGetPermission(w http.ResponseWriter, r *http.Request) {
+	project, ok := handler.serverProductCtx(w, r)
+	if !ok {
+		return
+	}
+	slug := chi.URLParam(r, "slug")
+	perms, err := handler.repo.GetPermissionsByProductID(r.Context(), project.ID)
+	if err != nil {
+		log.Err(err).Msg("ServerGetPermission: failed")
+		WriteError(w, r, "error.internalError", http.StatusInternalServerError)
+		return
+	}
+	for _, p := range perms {
+		if p.Slug == slug {
+			utils.WriteJson(w, ServerPermissionSummary{Slug: p.Slug, Name: p.Name})
+			return
+		}
+	}
+	WriteError(w, r, "error.notFound", http.StatusNotFound)
 }
 
 // ServerCreatePermission defines a new permission in the product.

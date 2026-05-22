@@ -136,6 +136,18 @@ paths:
         in: path
         required: true
         schema: { type: string }
+    get:
+      tags: [Authorization]
+      summary: Get a role
+      description: One role with its granted permission slugs.
+      operationId: getRole
+      responses:
+        "200":
+          description: The role.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleSummary" }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Authorization]
       summary: Update a role
@@ -204,6 +216,17 @@ paths:
         in: path
         required: true
         schema: { type: string }
+    get:
+      tags: [Authorization]
+      summary: Get a permission
+      operationId: getPermission
+      responses:
+        "200":
+          description: The permission.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PermissionSummary" }
+        "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Authorization]
       summary: Rename a permission

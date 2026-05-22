@@ -165,9 +165,11 @@ func (a *AppService) serverAPIRouter(h *api.RequestHandler) *chi.Mux {
 	appRouter.Get("/roles", h.ServerListRoles)
 	appRouter.Get("/permissions", h.ServerListPermissions)
 	// RBAC definition management (create/update/delete roles & permissions).
+	appRouter.Get("/roles/{slug}", h.ServerGetRole)
 	appRouter.Post("/roles", h.ServerCreateRole)
 	appRouter.Patch("/roles/{slug}", h.ServerUpdateRole)
 	appRouter.Delete("/roles/{slug}", h.ServerDeleteRole)
+	appRouter.Get("/permissions/{slug}", h.ServerGetPermission)
 	appRouter.Post("/permissions", h.ServerCreatePermission)
 	appRouter.Patch("/permissions/{slug}", h.ServerUpdatePermission)
 	appRouter.Delete("/permissions/{slug}", h.ServerDeletePermission)

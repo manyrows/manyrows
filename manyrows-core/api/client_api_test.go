@@ -318,9 +318,11 @@ func setupServerAPIRouter(t *testing.T) *chi.Mux {
 	appRouter.Get("/check-permission", requestHandler.ServerCheckPermission)
 	appRouter.Get("/roles", requestHandler.ServerListRoles)
 	appRouter.Get("/permissions", requestHandler.ServerListPermissions)
+	appRouter.Get("/roles/{slug}", requestHandler.ServerGetRole)
 	appRouter.Post("/roles", requestHandler.ServerCreateRole)
 	appRouter.Patch("/roles/{slug}", requestHandler.ServerUpdateRole)
 	appRouter.Delete("/roles/{slug}", requestHandler.ServerDeleteRole)
+	appRouter.Get("/permissions/{slug}", requestHandler.ServerGetPermission)
 	appRouter.Post("/permissions", requestHandler.ServerCreatePermission)
 	appRouter.Patch("/permissions/{slug}", requestHandler.ServerUpdatePermission)
 	appRouter.Delete("/permissions/{slug}", requestHandler.ServerDeletePermission)
@@ -3546,6 +3548,22 @@ func TestServerRbacCrud(t *testing.T) {
 	if role.Slug != "editor" || len(role.Permissions) != 1 || role.Permissions[0] != "posts:read" {
 		t.Fatalf("created role mismatch: %+v", role)
 	}
+	// Duplicate role slug → 409; missing slug/name → 400.
+	if rr := send(http.MethodPost, "/roles", `{"slug":"editor","name":"dup"}`); rr.Code != http.StatusConflict {
+		t.Fatalf("dup role: expected 409, got %d", rr.Code)
+	}
+	if rr := send(http.MethodPost, "/roles", `{"name":"no slug"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("role missing slug: expected 400, got %d", rr.Code)
+	}
+	// Read one role back.
+	rr = send(http.MethodGet, "/roles/editor", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get role: %d %s", rr.Code, rr.Body.String())
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &role)
+	if role.Slug != "editor" || len(role.Permissions) != 1 {
+		t.Fatalf("get role mismatch: %+v", role)
+	}
 
 	// Update role: rename + replace permissions.
 	rr = send(http.MethodPatch, "/roles/editor", `{"name":"Editor v2","permissions":["posts:read","posts:write"]}`)
@@ -3560,6 +3578,16 @@ func TestServerRbacCrud(t *testing.T) {
 	// Rename a permission.
 	if rr := send(http.MethodPatch, "/permissions/posts:read", `{"name":"Read all posts"}`); rr.Code != http.StatusOK {
 		t.Fatalf("update perm: %d %s", rr.Code, rr.Body.String())
+	}
+	// Read one permission back; unknown role/permission slug → 404.
+	if rr := send(http.MethodGet, "/permissions/posts:read", ""); rr.Code != http.StatusOK {
+		t.Fatalf("get perm: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := send(http.MethodGet, "/roles/ghost", ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("get unknown role: expected 404, got %d", rr.Code)
+	}
+	if rr := send(http.MethodGet, "/permissions/ghost", ""); rr.Code != http.StatusNotFound {
+		t.Fatalf("get unknown perm: expected 404, got %d", rr.Code)
 	}
 
 	// Update a non-existent role → 400 (unknown slug).

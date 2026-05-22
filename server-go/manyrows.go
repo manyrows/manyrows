@@ -323,12 +323,24 @@ func (c *Client) ListRoles(ctx context.Context) ([]RoleSummary, error) {
 	return out.Roles, c.do(ctx, http.MethodGet, "/roles", nil, nil, &out)
 }
 
+// GetRole fetches one role (with its permission slugs) by slug.
+func (c *Client) GetRole(ctx context.Context, slug string) (*RoleSummary, error) {
+	var out RoleSummary
+	return &out, c.do(ctx, http.MethodGet, "/roles/"+url.PathEscape(slug), nil, nil, &out)
+}
+
 // ListPermissions returns the product's permissions.
 func (c *Client) ListPermissions(ctx context.Context) ([]PermissionSummary, error) {
 	var out struct {
 		Permissions []PermissionSummary `json:"permissions"`
 	}
 	return out.Permissions, c.do(ctx, http.MethodGet, "/permissions", nil, nil, &out)
+}
+
+// GetPermission fetches one permission by slug.
+func (c *Client) GetPermission(ctx context.Context, slug string) (*PermissionSummary, error) {
+	var out PermissionSummary
+	return &out, c.do(ctx, http.MethodGet, "/permissions/"+url.PathEscape(slug), nil, nil, &out)
 }
 
 // CreateRole defines a new role, optionally with permission slugs.

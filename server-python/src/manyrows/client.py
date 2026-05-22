@@ -98,10 +98,18 @@ class ManyRowsServer:
         data = self._request("GET", "/roles")
         return [from_dict(RoleSummary, r) for r in data.get("roles", [])]
 
+    def get_role(self, slug: str) -> RoleSummary:
+        """Fetch one role (with its permission slugs) by slug."""
+        return from_dict(RoleSummary, self._request("GET", f"/roles/{urllib.parse.quote(slug, safe='')}"))
+
     def list_permissions(self) -> list[PermissionSummary]:
         """The product's permissions."""
         data = self._request("GET", "/permissions")
         return [from_dict(PermissionSummary, p) for p in data.get("permissions", [])]
+
+    def get_permission(self, slug: str) -> PermissionSummary:
+        """Fetch one permission by slug."""
+        return from_dict(PermissionSummary, self._request("GET", f"/permissions/{urllib.parse.quote(slug, safe='')}"))
 
     def create_role(self, *, slug: str, name: str, permissions: Optional[list[str]] = None) -> RoleSummary:
         """Define a new role, optionally with permission slugs."""
