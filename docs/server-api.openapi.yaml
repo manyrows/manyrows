@@ -1,0 +1,652 @@
+openapi: 3.0.3
+info:
+  title: ManyRows Server-to-Server API
+  version: "1.0.0"
+  description: >
+    The customer backend (server-to-server) API. Authenticate every request
+    with a workspace API key in the `X-API-Key` header (or
+    `Authorization: Bearer <key>`). Every endpoint is scoped to **members of the
+    calling app**: the user pool only shares credentials across apps (SSO), it is
+    not an access boundary, so a key for one app only sees and acts on users who
+    have joined that app. For isolation between apps, give them separate pools.
+
+    Requests are rate limited per API key (HTTP 429 + `Retry-After` when
+    exceeded). Errors are returned as JSON `{ "error": "<code>", "message": "..." }`.
+servers:
+  - url: https://{host}/x/{workspaceSlug}/api/v1
+    description: A workspace's server API base.
+    variables:
+      host:
+        default: auth.example.com
+        description: Your ManyRows host.
+      workspaceSlug:
+        default: your-workspace
+        description: The workspace slug.
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Delivery
+    description: Runtime config and feature flags for the app.
+  - name: Authorization
+    description: Permission checks and the role/permission catalog.
+  - name: Users
+    description: Provision, look up, modify, and remove app members.
+  - name: User fields
+    description: Read and write per-user metadata.
+
+paths:
+  /apps/{appId}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Delivery]
+      summary: Runtime delivery
+      description: >
+        All config values and feature flags for the app. Supports `ETag` /
+        `If-None-Match` (returns `304 Not Modified` when unchanged).
+      operationId: getDelivery
+      responses:
+        "200":
+          description: Config and flags.
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeliveryResponse" }
+        "304": { description: Not modified (matched `If-None-Match`). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /apps/{appId}/check-permission:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Authorization]
+      summary: Check a user's permission
+      operationId: checkPermission
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          description: The user ID (a member of this app) to check.
+          schema: { type: string, format: uuid }
+        - name: permission
+          in: query
+          required: true
+          description: Permission slug, e.g. `posts:read`.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Whether the user has the permission.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckPermissionResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/roles:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Authorization]
+      summary: List roles
+      description: The product's roles, each with the permission slugs it grants.
+      operationId: listRoles
+      responses:
+        "200":
+          description: Role catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RolesListResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /apps/{appId}/permissions:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Authorization]
+      summary: List permissions
+      operationId: listPermissions
+      responses:
+        "200":
+          description: Permission catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PermissionsListResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /apps/{appId}/users:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Users]
+      summary: List members or look one up by email
+      description: >
+        With no `email`, lists the app's members (paginated, `search` substring
+        filter) and returns a `MembersListResponse`. With `email=<addr>`, returns
+        that single member as a `ServerUserResponse`.
+      operationId: listOrLookupUsers
+      parameters:
+        - name: email
+          in: query
+          description: Exact email — returns a single deep user instead of a list.
+          schema: { type: string, format: email }
+        - name: search
+          in: query
+          description: Email substring filter for the list.
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 0, minimum: 0 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: A member list, or a single user when `email` is given.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/MembersListResponse"
+                  - $ref: "#/components/schemas/ServerUserResponse"
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Users]
+      summary: Provision a user
+      description: >
+        Create-or-find a user by email in the app's pool and add them to the app,
+        in one idempotent call. Returns `201` for a new identity, `200` when an
+        existing one was reused.
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+      responses:
+        "201":
+          description: A new identity was created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateUserResponse" }
+        "200":
+          description: An existing identity was reused (now a member).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateUserResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /apps/{appId}/users/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags: [Users]
+      summary: Get a user by ID
+      operationId: getUser
+      responses:
+        "200":
+          description: The user with roles, permissions, and field values.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerUserResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Users]
+      summary: Suspend or re-enable a user
+      description: >
+        Set the user's status in this app. `disabled` blocks sign-in to this app
+        and revokes its active sessions; `active` restores access. Per-app — a
+        user shared across apps in one pool is unaffected elsewhere.
+      operationId: setUserStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetUserStatusRequest" }
+      responses:
+        "200":
+          description: Updated status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserStatusResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Users]
+      summary: Remove a user from the app
+      description: >
+        Drops the user's membership, roles, permission overrides, and sessions
+        for this app. If that leaves the user in no other app, the pool identity
+        is deleted too; otherwise it's kept.
+      operationId: removeUser
+      responses:
+        "200":
+          description: Removed; says whether the identity was also deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemoveUserResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/users/{userId}/roles:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/UserId"
+    put:
+      tags: [Users]
+      summary: Replace a user's roles
+      description: >
+        Full replace (not merge), by role slug. An empty array clears all roles
+        and revokes the user's sessions for the app.
+      operationId: replaceUserRoles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReplaceRolesRequest" }
+      responses:
+        "200":
+          description: The resulting role slugs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RolesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/users/{userId}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/UserId"
+    delete:
+      tags: [Users]
+      summary: Revoke a user's sessions (force-logout)
+      operationId: revokeUserSessions
+      responses:
+        "200":
+          description: Count of sessions revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RevokeSessionsResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/users/{userId}/magic-link:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags: [Users]
+      summary: Generate a one-time sign-in link
+      description: >
+        Returns a single-use, 15-minute passwordless sign-in URL for the member,
+        to deliver out-of-band. Requires the app's primary auth method to be
+        Magic Link with an App URL set. Issuing a new link invalidates any prior
+        unconsumed one for the same user.
+      operationId: createMagicLink
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MagicLinkRequest" }
+      responses:
+        "200":
+          description: The sign-in URL and its expiry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MagicLinkResponse" }
+        "403":
+          description: App is not configured for magic-link sign-in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/user-fields:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [User fields]
+      summary: List user-field definitions
+      operationId: listUserFields
+      responses:
+        "200":
+          description: The pool's user-field schema.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserFieldsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /apps/{appId}/user-fields/users/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags: [User fields]
+      summary: Get a user's field values
+      operationId: getUserFieldValues
+      responses:
+        "200":
+          description: The user's field values.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserFieldValuesResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /apps/{appId}/user-fields/{userFieldId}/users/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - name: userFieldId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - $ref: "#/components/parameters/UserId"
+    put:
+      tags: [User fields]
+      summary: Set a user's field value
+      operationId: setUserFieldValue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertFieldValueRequest" }
+      responses:
+        "200":
+          description: The stored value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserFieldValueResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [User fields]
+      summary: Clear a user's field value
+      operationId: deleteUserFieldValue
+      responses:
+        "204": { description: Cleared. }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    AppId:
+      name: appId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found, or the user is not a member of this app.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, description: "Stable error code, e.g. error.notFound." }
+        message: { type: string, description: Human-readable message. }
+      required: [error, message]
+
+    UserResource:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        enabled: { type: boolean }
+        emailVerifiedAt: { type: string, format: date-time, nullable: true }
+        passwordSetAt: { type: string, format: date-time, nullable: true }
+        totpEnabled: { type: boolean }
+        source: { type: string, description: "invited | registered | google | apple | microsoft | github | external" }
+
+    ServerUserResponse:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/UserResource" }
+        roles: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string } }
+        fields: { type: array, items: { $ref: "#/components/schemas/UserFieldValue" } }
+
+    Member:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string }
+        enabled: { type: boolean }
+        emailVerifiedAt: { type: string, format: date-time, nullable: true }
+        passwordSetAt: { type: string, format: date-time, nullable: true }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+        source: { type: string }
+        addedAt: { type: string, format: date-time }
+        roles: { type: array, items: { type: string } }
+
+    MembersListResponse:
+      type: object
+      properties:
+        members: { type: array, items: { $ref: "#/components/schemas/Member" } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    CheckPermissionResponse:
+      type: object
+      properties:
+        allowed: { type: boolean }
+        permission: { type: string }
+        accountId: { type: string, format: uuid }
+
+    RoleSummary:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+          description: Permission slugs this role grants.
+
+    RolesListResponse:
+      type: object
+      properties:
+        roles: { type: array, items: { $ref: "#/components/schemas/RoleSummary" } }
+
+    PermissionSummary:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+
+    PermissionsListResponse:
+      type: object
+      properties:
+        permissions: { type: array, items: { $ref: "#/components/schemas/PermissionSummary" } }
+
+    CreateUserRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        emailVerified:
+          type: boolean
+          description: Mark the address verified (you vouch for it). Defaults to false.
+        roles:
+          type: array
+          items: { type: string }
+          description: Role slugs to assign in this app.
+
+    CreateUserResponse:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/UserResource" }
+        created: { type: boolean, description: True when a new identity was created. }
+        roles: { type: array, items: { type: string } }
+
+    SetUserStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [active, disabled] }
+
+    UserStatusResponse:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        status: { type: string, enum: [active, disabled] }
+
+    RemoveUserResponse:
+      type: object
+      properties:
+        removedFromApp: { type: boolean }
+        identityDeleted: { type: boolean, description: True when the pool identity was also deleted (user was orphaned). }
+
+    RevokeSessionsResponse:
+      type: object
+      properties:
+        revoked: { type: integer }
+
+    ReplaceRolesRequest:
+      type: object
+      required: [roles]
+      properties:
+        roles: { type: array, items: { type: string }, description: "Full set of role slugs (replace, not merge)." }
+
+    RolesResponse:
+      type: object
+      properties:
+        roles: { type: array, items: { type: string } }
+
+    MagicLinkRequest:
+      type: object
+      properties:
+        rememberMe: { type: boolean, description: Issue a longer-lived session when the link is consumed. }
+
+    MagicLinkResponse:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        expiresAt: { type: string, format: date-time }
+
+    UserField:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userPoolId: { type: string, format: uuid }
+        key: { type: string }
+        valueType: { type: string, enum: [string, bool, date] }
+        visibility: { type: string, enum: [client, server] }
+        userEditable: { type: boolean }
+        label: { type: string }
+        status: { type: string, description: "active | archived" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        createdBy: { type: string, format: uuid }
+
+    UserFieldValue:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        userFieldId: { type: string, format: uuid }
+        value:
+          description: The field value (string, boolean, or date string per the field's type).
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string, format: uuid }
+
+    UserFieldsResponse:
+      type: object
+      properties:
+        userFields: { type: array, items: { $ref: "#/components/schemas/UserField" } }
+
+    UserFieldValuesResponse:
+      type: object
+      properties:
+        values: { type: array, items: { $ref: "#/components/schemas/UserFieldValue" } }
+
+    UserFieldValueResponse:
+      type: object
+      properties:
+        value: { $ref: "#/components/schemas/UserFieldValue" }
+
+    UpsertFieldValueRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          description: The value to store; validated against the field's type.
+
+    DeliveryResponse:
+      type: object
+      properties:
+        workspaceId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        appId: { type: string, format: uuid }
+        updatedAt: { type: string, format: date-time }
+        config: { $ref: "#/components/schemas/DeliveryConfigBuckets" }
+        flags: { $ref: "#/components/schemas/DeliveryFlagBuckets" }
+
+    DeliveryConfigBuckets:
+      type: object
+      properties:
+        public: { type: array, items: { $ref: "#/components/schemas/DeliveryConfigItem" } }
+        private: { type: array, items: { $ref: "#/components/schemas/DeliveryConfigItem" } }
+        secrets: { type: array, items: { $ref: "#/components/schemas/DeliveryConfigItem" } }
+
+    DeliveryConfigItem:
+      type: object
+      properties:
+        key: { type: string }
+        type: { type: string }
+        value:
+          description: Present for public/private items.
+        isSet: { type: boolean, description: Present for secret items. }
+        envelope:
+          description: Encrypted payload, present for secret items.
+
+    DeliveryFlagBuckets:
+      type: object
+      properties:
+        client: { type: array, items: { $ref: "#/components/schemas/DeliveryFlagItem" } }
+        server: { type: array, items: { $ref: "#/components/schemas/DeliveryFlagItem" } }
+
+    DeliveryFlagItem:
+      type: object
+      properties:
+        key: { type: string }
+        enabled: { type: boolean }
+        roleIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: If set, the flag applies only to users with one of these roles.
