@@ -251,30 +251,6 @@ func sendCustomSMTP(e *Email, cfg *SMTPConfig) error {
 	return c.Quit()
 }
 
-func (s *Service) SendAdminRegisterEmail(toEmail string, magicLink string, lang string) error {
-	body := fmt.Sprintf(T(lang, "admin.register.body"), magicLink)
-
-	email := Email{
-		To:      toEmail,
-		From:    defaultFromEmail(),
-		Subject: T(lang, "admin.register.subject"),
-		Body:    body,
-	}
-	return s.Send(&email)
-}
-
-func (s *Service) SendAdminLoginEmail(toEmail string, magicLink string, lang string) error {
-	body := fmt.Sprintf(T(lang, "admin.login.body"), magicLink)
-
-	email := Email{
-		To:      toEmail,
-		From:    defaultFromEmail(),
-		Subject: T(lang, "admin.login.subject"),
-		Body:    body,
-	}
-	return s.Send(&email)
-}
-
 // SendLoginToWorkspaceEmail todo: optional project name to give email context (but always log into workspace)
 func (s *Service) SendLoginToWorkspaceEmail(toEmail string, magicLink string, workspaceName string, lang string) error {
 	subject := fmt.Sprintf(T(lang, "workspace.login.subject"), workspaceName)
