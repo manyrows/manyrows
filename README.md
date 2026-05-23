@@ -2,7 +2,7 @@
 
 Self-hostable user authentication you can drop in front of your apps.
 Sign-in, password reset, email verification, magic links, OAuth (Google,
-Apple, Microsoft, GitHub) plus any OIDC/OAuth2 provider, passkeys,
+Apple, Microsoft, GitHub, Kakao, Naver) plus any OIDC/OAuth2 provider, passkeys,
 sessions, audit logs, role-based access - running as a single Go binary
 with Postgres.
 
@@ -73,9 +73,9 @@ docker compose down
 ## What you get
 
 - **Sign-in methods** per app: password, OTP code, magic link, OAuth
-  (Google / Apple / Microsoft / GitHub), any OIDC/OAuth2 provider,
-  passkeys.
-- **Bring-your-own identity providers** - beyond the four built-in
+  (Google / Apple / Microsoft / GitHub / Kakao / Naver), any OIDC/OAuth2
+  provider, passkeys.
+- **Bring-your-own identity providers** - beyond the six built-in
   social logins, connect any OpenID Connect or OAuth2 provider per app
   (Okta, Auth0, Keycloak, Entra/Azure AD, GitLab, Discord, ...) from the
   admin UI: paste an issuer URL (or explicit endpoints) plus client
