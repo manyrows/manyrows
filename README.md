@@ -82,10 +82,10 @@ docker compose down
   credentials - no code, no release. Covers corporate SSO and the long
   tail. PKCE + nonce, signature/issuer/audience verification, and
   https-only endpoints are enforced for you.
-- **Workspace + project + app hierarchy** - one ManyRows install
-  groups environments (dev / staging / prod) under projects, and
-  projects under workspaces.
-- **Role-based access control** - per-project permissions and roles,
+- **Workspace + product + app hierarchy** - one ManyRows install
+  groups environments (dev / staging / prod) under products, and
+  products under workspaces.
+- **Role-based access control** - per-product permissions and roles,
   default-role assignment on signup.
 - **Session management** - per-app session TTL, cookie-domain control,
   IP allowlists, CORS origin lists, revocation.
@@ -374,7 +374,7 @@ cd manyrows-core
 go test ./api/... -count=1
 
 # Run a specific test:
-go test -v ./api/... -run "TestCreateProject" -count=1
+go test -v ./api/... -run "TestCreateProduct" -count=1
 ```
 
 The repo is an npm workspace at the root, so `npm install` from the
