@@ -26,6 +26,11 @@ export interface ManyRowsServerOptions {
   apiKey: string;
   /** Override the fetch implementation (defaults to the global `fetch`). */
   fetch?: typeof globalThis.fetch;
+  /**
+   * Per-request timeout in milliseconds. A request that doesn't complete
+   * within this window is aborted and the call rejects. Defaults to 30000.
+   */
+  timeoutMs?: number;
 }
 
 export type UserSource =
@@ -291,6 +296,7 @@ export class ManyRowsServer {
   private readonly base: string;
   private readonly apiKey: string;
   private readonly fetchImpl: typeof globalThis.fetch;
+  private readonly timeoutMs: number;
 
   constructor(opts: ManyRowsServerOptions) {
     if (!opts.baseUrl) throw new Error("ManyRowsServer: baseUrl is required");
@@ -307,6 +313,7 @@ export class ManyRowsServer {
       throw new Error("ManyRowsServer: no global fetch; pass opts.fetch (Node 18+ has fetch built in)");
     }
     this.fetchImpl = f;
+    this.timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 30_000;
   }
 
   // ---- Delivery ----
@@ -795,7 +802,12 @@ export class ManyRowsServer {
       body = JSON.stringify(opts.body);
     }
 
-    const res = await this.fetchImpl(url, { method, headers, body });
+    const res = await this.fetchImpl(url, {
+      method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
 
     if (!res.ok) {
       let code = `http_${res.status}`;
