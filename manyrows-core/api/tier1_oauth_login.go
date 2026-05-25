@@ -202,7 +202,14 @@ func (handler *RequestHandler) completeTier1OAuthLogin(
 		}
 	}
 
-	if ctxApp.Require2FA {
+	// Enforce TOTP before issuing any session — voluntary (the user
+	// enrolled it) or required by the app. This must run regardless of
+	// ctxApp.Require2FA so a user who turned on 2FA is challenged on OAuth
+	// logins too, matching the password and email-OTP paths
+	// (workspace_auth.go) and magic links (workspace_magic_link.go).
+	// Gating it behind Require2FA let an OAuth sign-in skip a second
+	// factor the user had explicitly enabled.
+	{
 		userTOTP, totpErr := handler.repo.GetUserByIDWithTOTP(r.Context(), user.ID)
 		if totpErr != nil {
 			log.Err(totpErr).Msgf("failed to fetch user TOTP data for %s login", opts.WebhookMethod)
@@ -217,14 +224,17 @@ func (handler *RequestHandler) completeTier1OAuthLogin(
 			})
 			return
 		}
-		// No TOTP enrolled — return setup challenge. NO session, NO
-		// tokens until /auth/totp/setup-* completes enrollment.
-		setupChallenge := handler.IssueTOTPSetupChallenge(user.ID, ctxApp.ID, rememberMe)
-		utils.WriteJson(w, map[string]any{
-			"setupChallengeToken": setupChallenge,
-			"totpSetupRequired":   true,
-		})
-		return
+		// No TOTP enrolled — if the app requires it, hand back a setup
+		// challenge. NO session, NO tokens until /auth/totp/setup-*
+		// completes enrollment.
+		if ctxApp.Require2FA {
+			setupChallenge := handler.IssueTOTPSetupChallenge(user.ID, ctxApp.ID, rememberMe)
+			utils.WriteJson(w, map[string]any{
+				"setupChallengeToken": setupChallenge,
+				"totpSetupRequired":   true,
+			})
+			return
+		}
 	}
 
 	ua := strings.TrimSpace(r.UserAgent())

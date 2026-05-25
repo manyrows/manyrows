@@ -332,4 +332,51 @@ func TestExternalIDP_E2E(t *testing.T) {
 			t.Fatalf("expected identity %q, got %+v", wantKey, rows)
 		}
 	})
+
+	// --- Voluntary TOTP is enforced on OAuth logins ---
+	// Regression test for the bug where the OAuth completion path only
+	// checked TOTP when the app forced 2FA (Require2FA). A user who
+	// enrolled TOTP themselves must still be challenged when signing in
+	// via an external IdP — otherwise the second factor they enabled is
+	// bypassable by choosing the OAuth front door.
+	t.Run("voluntary TOTP is enforced on OAuth login (Require2FA off)", func(t *testing.T) {
+		// Force the app to NOT require 2FA, so this exercises the
+		// voluntary path specifically (the bug was invisible when
+		// Require2FA was on, since that branch already challenged).
+		if _, err := testEnv.DB.Pool().Exec(ctx, "UPDATE apps SET require_2fa = false WHERE id = $1", app.ID); err != nil {
+			t.Fatalf("clear require_2fa: %v", err)
+		}
+
+		signInEmail := "e2e-voltotp-" + GenerateUniqueSlug("u") + "@example.com"
+		// Pre-create the user in the app's pool and enroll TOTP on them.
+		totpUser, _, err := testEnv.GetOrCreateUserWithMembership(ctx, signInEmail, app, core.UserSourceInvited)
+		if err != nil {
+			t.Fatalf("create totp user: %v", err)
+		}
+		secretEnc, err := enc.EncryptToBytesWithAAD([]byte("JBSWY3DPEHPK3PXP"), crypto.AAD("users", "totp_secret_encrypted", totpUser.ID))
+		if err != nil {
+			t.Fatalf("encrypt totp secret: %v", err)
+		}
+		if err := testEnv.Repo.SetUserTOTPSecret(ctx, totpUser.ID, secretEnc); err != nil {
+			t.Fatalf("set totp secret: %v", err)
+		}
+		backupEnc, err := enc.EncryptToBytesWithAAD([]byte("[]"), crypto.AAD("users", "totp_backup_codes_encrypted", totpUser.ID))
+		if err != nil {
+			t.Fatalf("encrypt backup codes: %v", err)
+		}
+		if err := testEnv.Repo.EnableUserTOTP(ctx, totpUser.ID, time.Now().UTC(), backupEnc); err != nil {
+			t.Fatalf("enable totp: %v", err)
+		}
+
+		cbRR := authorizeAndCallback(t, "mock", signInEmail, "mock-voltotp-sub", true)
+		body := cbRR.Body.String()
+		if !strings.Contains(body, "totpRequired") {
+			t.Fatalf("voluntary TOTP must be challenged on OAuth login, got: %s", body)
+		}
+		// And crucially: no session/tokens are issued before the second
+		// factor is satisfied.
+		if strings.Contains(body, "accessToken") || strings.Contains(body, "refreshToken") {
+			t.Fatalf("no tokens may be issued before TOTP is satisfied, got: %s", body)
+		}
+	})
 }
