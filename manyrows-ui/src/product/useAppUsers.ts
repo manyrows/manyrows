@@ -1,18 +1,13 @@
 import * as React from "react";
 import axios from "axios";
 import { useTranslation } from "react-i18next";
-import type { App, Product, ProductMemberRole, Role } from "../core.ts";
+import type { App, EnabledFilter, Product, ProductMemberRole, Role, RoleFilter, WorkspaceMember } from "../core.ts";
 import { extractApiError } from "../lib/apiError.ts";
-import type { EnabledFilter, RoleFilter, WorkspaceMember } from "./AppUsers.tsx";
 
 // Data layer for the App Users screen: the read API (roles/apps/member-roles
 // + the app-filtered, paged member list) and the useAppUsers hook that owns
 // the related state, filters, paging and the two loaders. Split out of
 // AppUsers.tsx so that (large) file stays presentation-focused.
-//
-// NOTE: this module imports ONLY types from AppUsers.tsx (erased at build), so
-// there is no runtime import cycle even though AppUsers.tsx imports values
-// (the hook, the fetchers, the two URL builders) from here.
 
 function rolesUrl(project: Product) {
   return `/admin/workspace/${project.workspaceId}/products/${project.id}/roles`;

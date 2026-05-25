@@ -1,5 +1,6 @@
 import * as React from "react";
 import axios from "axios";
+import { useDebouncedValue } from "../hooks/useDebouncedValue.ts";
 import {
   Alert,
   Box,
@@ -224,15 +225,6 @@ async function deleteSessionsByAccount(workspaceId: string, accountId: string, e
 async function pruneExpiredSessions(workspaceId: string): Promise<{ deleted: number }> {
   const r = await axios.post(`/admin/workspace/${workspaceId}/sessions/prune`);
   return r.data;
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = React.useState(value);
-  React.useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(t);
-  }, [value, delayMs]);
-  return debounced;
 }
 
 function DeviceIcon({ device }: { device: "mobile" | "tablet" | "desktop" }) {

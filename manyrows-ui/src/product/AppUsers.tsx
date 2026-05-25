@@ -1,6 +1,6 @@
 import * as React from "react";
 import axios from "axios";
-import type {Permission, Product, Role, UserField} from "../core.ts";
+import type {EnabledFilter, Permission, Product, Role, RoleFilter, UserField, WorkspaceMember} from "../core.ts";
 import { appTypeLabel } from "../core.ts";
 import { extractApiError } from "../lib/apiError.ts";
 import { useAppUsers, getProductMemberRoles, getProductMembersPaged, projectMemberRolesUrl, projectMembersUrl } from "./useAppUsers.ts";
@@ -39,6 +39,7 @@ import {
 } from "@mui/material";
 import { Activity, CircleCheck, CircleX, FileDown, FileUp, Layers, Link2, Lock, Plus, RefreshCw, Save, Search, SquarePen, Tag, Trash2, Users, X } from "lucide-react";
 import EmptyState from "../components/EmptyState.tsx";
+import ConfirmActionDialog from "../components/ConfirmActionDialog.tsx";
 import {useSnackbar} from "notistack";
 import {Link as RouterLink, useNavigate} from "react-router-dom";
 import {useTranslation, Trans} from "react-i18next";
@@ -60,25 +61,6 @@ const UserActivityDialog = React.lazy(() => import("./UserActivityDialog.tsx"));
 const UserTagsDialog = React.lazy(() => import("./UserTagsDialog.tsx"));
 
 /** ===== Types ===== */
-
-export interface WorkspaceMember {
-  accountId: string;
-  email: string;
-  enabled?: boolean;
-  emailVerifiedAt?: string | null;
-  passwordSetAt?: string | null;
-  lastLoginAt?: string | null;
-  source?: string;
-  createdAt?: string | null;
-  displayName?: string;
-  role?: string;
-  // Per-app activity stats (populated by the AppUsers list endpoint).
-  activeSessions?: number;
-  loginFailures7d?: number;
-  // Free-form tags (populated by the AppUsers list endpoint when an app
-  // context is resolvable).
-  tags?: string[];
-}
 
 interface Props {
   project: Product;
@@ -144,10 +126,6 @@ function sourceLabel(source: string): string {
   if (source === "invited") return "Added by admin";
   return "Signed up";
 }
-
-export type EnabledFilter = "" | "enabled" | "disabled";
-// RoleFilter values: "" (any), "without" (no roles), or a role UUID.
-export type RoleFilter = string;
 
 // Create a new user for an app.
 // roleIds is required by the server unless the app has a DefaultRoleID
@@ -238,43 +216,6 @@ function ConfirmRemoveMemberDialog(props: {
 }
 
 /** ===== Dialog: Add/Edit member roles (app REQUIRED) ===== */
-
-// ConfirmActionDialog — presentational shell for the small "are you sure?"
-// dialogs (enable/disable, clear password, reset 2FA, unlock). The parent owns
-// all state and the async confirm handler (open/close/reload/snackbar logic is
-// unchanged, just passed in via onConfirm), so this only unifies the repeated
-// Dialog/Title/Content/Actions + loading-aware confirm button boilerplate.
-function ConfirmActionDialog(props: {
-  open: boolean;
-  loading: boolean;
-  title: React.ReactNode;
-  children: React.ReactNode;
-  cancelLabel: string;
-  confirmLabel: string;
-  loadingLabel?: string;
-  confirmColor?: "primary" | "error";
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open={props.open} onClose={props.loading ? undefined : props.onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>{props.title}</DialogTitle>
-      <DialogContent>{props.children}</DialogContent>
-      <DialogActions>
-        <Button onClick={props.onClose} disabled={props.loading}>{props.cancelLabel}</Button>
-        <Button
-          variant="contained"
-          disableElevation
-          color={props.confirmColor ?? "primary"}
-          disabled={props.loading}
-          onClick={props.onConfirm}
-        >
-          {props.loading ? (props.loadingLabel ?? "...") : props.confirmLabel}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
 
 function MemberRolesDialog(props: {
   open: boolean;

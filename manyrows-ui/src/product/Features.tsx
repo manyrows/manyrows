@@ -5,7 +5,7 @@ import { useTranslation, Trans } from "react-i18next";
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 import type { App, FeatureFlag, FeatureFlagOverride, Product, Workspace } from "../core.ts";
-import { appTypeLabel } from "../core.ts";
+import { appTypeLabel, isProdApp } from "../core.ts";
 import { extractApiError } from "../lib/apiError.ts";
 import { appTypeColors, alpha } from "../colors.ts";
 import {
@@ -70,11 +70,6 @@ function fmtDate(d: string | number | Date | null | undefined): string {
   const date = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString();
-}
-
-function isProdApp(app: App | null | undefined): boolean {
-  if (!app) return false;
-  return app.type === "prod";
 }
 
 function normalizeScope(v: unknown): Scope {

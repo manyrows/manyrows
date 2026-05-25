@@ -8,6 +8,34 @@ export interface Account {
   isSuper?: boolean;
 }
 
+// WorkspaceMember is the per-app user row returned by the AppUsers list
+// endpoint: an account plus its app-scoped role, activity stats and tags.
+// Shared so the data hook (useAppUsers) and the screens that model the
+// same rows (Sessions, WorkspaceUsers) can reference it without importing
+// from a screen module.
+export interface WorkspaceMember {
+  accountId: string;
+  email: string;
+  enabled?: boolean;
+  emailVerifiedAt?: string | null;
+  passwordSetAt?: string | null;
+  lastLoginAt?: string | null;
+  source?: string;
+  createdAt?: string | null;
+  displayName?: string;
+  role?: string;
+  // Per-app activity stats (populated by the AppUsers list endpoint).
+  activeSessions?: number;
+  loginFailures7d?: number;
+  // Free-form tags (populated by the AppUsers list endpoint when an app
+  // context is resolvable).
+  tags?: string[];
+}
+
+export type EnabledFilter = "" | "enabled" | "disabled";
+// RoleFilter values: "" (any), "without" (no roles), or a role UUID.
+export type RoleFilter = string;
+
 export interface Workspace {
   id: string;
   name: string;
@@ -92,6 +120,12 @@ export function appDisplayName(
     case "dev": return `${name} (Dev)`;
     default: return name;
   }
+}
+
+// isProdApp reports whether an app targets the production environment.
+// Screens use it to gate destructive/elevated confirmations.
+export function isProdApp(app: { type?: AppType | string } | null | undefined): boolean {
+  return app?.type === "prod";
 }
 
 export type ConfigExposure = "public" | "private" | "secret";

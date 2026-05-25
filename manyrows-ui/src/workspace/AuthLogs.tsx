@@ -1,6 +1,7 @@
 import * as React from "react";
 import axios from "axios";
 import { extractApiError } from "../lib/apiError.ts";
+import { useDebouncedValue } from "../hooks/useDebouncedValue.ts";
 import {
   Alert,
   Box,
@@ -221,18 +222,6 @@ function fmtRelative(d: string | number | Date | null | undefined, t: (key: stri
   if (diff < 3_600_000) return t("sessions.minutesAgo", { count: Math.floor(diff / 60_000) });
   if (diff < 86_400_000) return t("sessions.hoursAgo", { count: Math.floor(diff / 3_600_000) });
   return t("sessions.daysAgo", { count: Math.floor(diff / 86_400_000) });
-}
-
-// useDebouncedValue keeps the email/IP search inputs from firing a
-// network request on every keystroke. 350ms matches the rest of the
-// admin app's free-text filter inputs.
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = React.useState(value);
-  React.useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(t);
-  }, [value, delayMs]);
-  return debounced;
 }
 
 // uaSummary turns a 200-char user-agent string into "Chrome on macOS"

@@ -6,7 +6,7 @@ import { useTranslation, Trans } from "react-i18next";
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 import type { ConfigExposure, ConfigKey, ConfigValue, ConfigValueType, App, Product, Workspace } from "../core.ts";
-import { appTypeLabel } from "../core.ts";
+import { appTypeLabel, isProdApp } from "../core.ts";
 import { alpha } from "../colors.ts";
 import EncryptionKeyTab from "./EncryptionKeyTab.tsx";
 import {
@@ -138,10 +138,6 @@ function typeHint(vt: string, t: TFunc): string {
   return hit ? hit.hint : "";
 }
 
-function isProdApp(app: App | null | undefined): boolean {
-  if (!app) return false;
-  return app.type === "prod";
-}
 
 function safeValueJsonFromConfigValue(v: unknown): unknown {
   // Supports older shapes too.
