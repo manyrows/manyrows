@@ -7,6 +7,7 @@ import { useTranslation, Trans } from "react-i18next";
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 import type { ConfigExposure, ConfigKey, ConfigValue, ConfigValueType, App, Product, Workspace } from "../core.ts";
 import { appTypeLabel, isProdApp } from "../core.ts";
+import { useEnvSwitch } from "./useEnvSwitch.ts";
 import { alpha } from "../colors.ts";
 import EncryptionKeyTab from "./EncryptionKeyTab.tsx";
 import {
@@ -518,25 +519,30 @@ export default function ConfigKeys({ project, appId: fixedAppId }: Props) {
   const [keys, setKeys] = React.useState<ConfigKey[]>([]);
   const [values, setValues] = React.useState<ConfigValue[]>([]);
 
-  // Keep as string (not null) so MUI select behaves predictably
-  const [selectedAppId, setSelectedAppId] = React.useState<string>(fixedAppId || "");
-
-  React.useEffect(() => {
-    if (fixedAppId) setSelectedAppId(fixedAppId);
-  }, [fixedAppId]);
-
   const secretReady = !!workspaceEncKey?.publicKeyJwk && !!workspaceEncKey?.fingerprint;
 
   const keysTotal = keys.length;
   const editLocked = false;
 
-  // Prod confirm dialog state
-  const [prodConfirmOpen, setProdConfirmOpen] = React.useState(false);
-  const [pendingAppId, setPendingAppId] = React.useState<string>("");
-
   // Draft state is per (configKeyId, appId)
   const [draft, setDraft] = React.useState<Record<string, DraftEntry>>({});
   const [dirty, setDirty] = React.useState<Set<string>>(new Set());
+
+  const {
+    selectedAppId,
+    setSelectedAppId,
+    prodConfirmOpen,
+    pendingApp,
+    requestEnvSwitch,
+    confirmProdSwitch,
+    cancelProdSwitch,
+    resetProdConfirm,
+  } = useEnvSwitch(apps, fixedAppId, {
+    onApply: () => {
+      setDraft({});
+      setDirty(new Set());
+    },
+  });
 
   // Create key dialog state
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -682,8 +688,7 @@ export default function ConfigKeys({ project, appId: fixedAppId }: Props) {
       setDraft({});
       setDirty(new Set());
       setSelectedKey(null);
-      setPendingAppId("");
-      setProdConfirmOpen(false);
+      resetProdConfirm();
 
       // Also refresh workspace encryption key (non-blocking)
       void loadWorkspaceEncryptionKey();
@@ -1038,42 +1043,6 @@ export default function ConfigKeys({ project, appId: fixedAppId }: Props) {
   }
 
   const hasApps = apps.length > 0;
-
-  function applyEnvSwitch(nextAppId: string) {
-    setSelectedAppId(nextAppId);
-    setDraft({});
-    setDirty(new Set());
-  }
-
-  function requestEnvSwitch(nextAppId: string) {
-    if (!nextAppId || nextAppId === selectedAppId) return;
-
-    const nextApp = apps.find((e) => e.id === nextAppId) || null;
-    if (isProdApp(nextApp)) {
-      setPendingAppId(nextAppId);
-      setProdConfirmOpen(true);
-      return;
-    }
-
-    applyEnvSwitch(nextAppId);
-  }
-
-  function confirmProdSwitch() {
-    const next = pendingAppId;
-    setProdConfirmOpen(false);
-    setPendingAppId("");
-    if (!next) return;
-    applyEnvSwitch(next);
-  }
-
-  function cancelProdSwitch() {
-    setProdConfirmOpen(false);
-    setPendingAppId("");
-  }
-
-  const pendingApp = React.useMemo(() => {
-    return apps.find((e) => e.id === pendingAppId) || null;
-  }, [apps, pendingAppId]);
 
   function renderValueEditor(k: ConfigKey, d: DraftEntry, exists: boolean) {
     const exposure = (k.exposure as ConfigExposure) || "private";

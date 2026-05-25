@@ -6,6 +6,7 @@ import { useTranslation, Trans } from "react-i18next";
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 import type { App, FeatureFlag, FeatureFlagOverride, Product, Workspace } from "../core.ts";
 import { appTypeLabel, isProdApp } from "../core.ts";
+import { useEnvSwitch } from "./useEnvSwitch.ts";
 import { extractApiError } from "../lib/apiError.ts";
 import { appTypeColors, alpha } from "../colors.ts";
 import {
@@ -125,21 +126,19 @@ export default function Features({ project, appId: fixedAppId }: Props) {
   const [overrides, setOverrides] = React.useState<FeatureFlagOverride[]>([]);
   const [roles, setRoles] = React.useState<{ id: string; name: string; slug: string }[]>([]);
 
-  // Keep as string (not null) so MUI select behaves predictably.
-  const [selectedAppId, setSelectedAppId] = React.useState<string>(fixedAppId || "");
-
-  React.useEffect(() => {
-    if (fixedAppId) setSelectedAppId(fixedAppId);
-  }, [fixedAppId]);
-
-  const selectedApp = React.useMemo(
-    () => apps.find((e) => e.id === selectedAppId) || null,
-    [apps, selectedAppId],
-  );
-
-  // Prod confirm dialog state (same behavior as config keys page)
-  const [prodConfirmOpen, setProdConfirmOpen] = React.useState(false);
-  const [pendingAppId, setPendingAppId] = React.useState<string>("");
+  const {
+    selectedAppId,
+    setSelectedAppId,
+    selectedApp,
+    prodConfirmOpen,
+    pendingApp,
+    requestEnvSwitch,
+    confirmProdSwitch,
+    cancelProdSwitch,
+  } = useEnvSwitch(apps, fixedAppId, {
+    onConfirmProd: () => enqueueSnackbar(t("features.snackbar.switchedToProd"), { variant: "info" }),
+    onCancelProd: () => enqueueSnackbar(t("features.snackbar.cancelledProdSwitch"), { variant: "info" }),
+  });
 
   // Per-flag saving state (for optimistic toggle)
   const [savingFlagIds, setSavingFlagIds] = React.useState<Set<string>>(new Set());
@@ -311,42 +310,6 @@ export default function Features({ project, appId: fixedAppId }: Props) {
       setSavingFlagIds((prev) => { const next = new Set(prev); next.delete(flag.id); return next; });
     }
   }
-
-  function applyEnvSwitch(nextAppId: string) {
-    setSelectedAppId(nextAppId);
-  }
-
-  function requestEnvSwitch(nextAppId: string) {
-    if (!nextAppId || nextAppId === selectedAppId) return;
-
-    const nextApp = apps.find((e) => e.id === nextAppId) || null;
-    if (isProdApp(nextApp)) {
-      setPendingAppId(nextAppId);
-      setProdConfirmOpen(true);
-      return;
-    }
-
-    applyEnvSwitch(nextAppId);
-  }
-
-  function confirmProdSwitch() {
-    const next = pendingAppId;
-    setProdConfirmOpen(false);
-    setPendingAppId("");
-    if (!next) return;
-    applyEnvSwitch(next);
-    enqueueSnackbar(t("features.snackbar.switchedToProd"), { variant: "info" });
-  }
-
-  function cancelProdSwitch() {
-    setProdConfirmOpen(false);
-    setPendingAppId("");
-    enqueueSnackbar(t("features.snackbar.cancelledProdSwitch"), { variant: "info" });
-  }
-
-  const pendingApp = React.useMemo(() => {
-    return apps.find((e) => e.id === pendingAppId) || null;
-  }, [apps, pendingAppId]);
 
   const flagsCount = flags.length;
 
