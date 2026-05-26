@@ -16,6 +16,7 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -42,7 +43,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { Ban, CircleCheck, Download, Flag, Lightbulb, Plus, RefreshCw, Save, Search, SquarePen, Trash2, X } from "lucide-react";
+import { Ban, ChevronDown, ChevronRight, CircleCheck, Download, Flag, Lightbulb, Plus, RefreshCw, Save, Search, SquarePen, Trash2, X } from "lucide-react";
 import PageHeader from "../components/PageHeader.tsx";
 const tc = { code: <code />, b: <b />, strong: <strong /> };
 
@@ -110,6 +111,44 @@ function escapeCsvField(value: string): string {
   return value;
 }
 
+// Compact, collapsible explanation of how feature flags + scope work.
+// Mirrors the Config Keys legend disclosure so the two sibling pages
+// read as one system.
+function FeaturesAbout(props: { expanded: boolean; onToggle: () => void; t: TFunc }) {
+  const { expanded, onToggle, t } = props;
+  return (
+    <Box>
+      <Button
+        onClick={onToggle}
+        startIcon={expanded ? <ChevronDown size={13} strokeWidth={1.75} /> : <ChevronRight size={13} strokeWidth={1.75} />}
+        sx={{
+          minWidth: 0,
+          px: 0,
+          py: 0,
+          color: "text.secondary",
+          textTransform: "none",
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "0.04em",
+          "&:hover": { bgcolor: "transparent", color: "text.primary" },
+        }}
+      >
+        {t("features.info.title")}
+      </Button>
+      <Collapse in={expanded}>
+        <Stack spacing={0.5} sx={{ mt: 1, pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
+          <Typography variant="caption" color="text.secondary">
+            <Trans i18nKey="features.info.description" components={tc} />
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            <Trans i18nKey="features.info.scope" components={tc} />
+          </Typography>
+        </Stack>
+      </Collapse>
+    </Box>
+  );
+}
+
 export default function Features({ project, appId: fixedAppId }: Props) {
   const { t } = useTranslation();
   const { enqueueSnackbar } = useSnackbar();
@@ -163,6 +202,22 @@ export default function Features({ project, appId: fixedAppId }: Props) {
 
   // Search
   const [searchQuery, setSearchQuery] = React.useState("");
+
+  // Explanation disclosure - persisted like the Config Keys legend.
+  const [helpExpanded, setHelpExpanded] = React.useState<boolean>(() => {
+    try {
+      return localStorage.getItem("manyrows:features:helpExpanded") === "1";
+    } catch {
+      return false;
+    }
+  });
+  React.useEffect(() => {
+    try {
+      localStorage.setItem("manyrows:features:helpExpanded", helpExpanded ? "1" : "0");
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [helpExpanded]);
 
   // Export menu
   const [exportAnchorEl, setExportAnchorEl] = React.useState<null | HTMLElement>(null);
@@ -565,12 +620,6 @@ export default function Features({ project, appId: fixedAppId }: Props) {
           mb={0}
           action={
             <>
-              <Chip
-                size="small"
-                variant="outlined"
-                label={t("features.flagsCount", { current: flagsCount.toLocaleString() })}
-                sx={{ fontFamily: "var(--font-mono)" }}
-              />
               <Tooltip title={t("features.refresh")}>
                 <span>
                   <IconButton onClick={() => void refreshAll()} disabled={loading || saving} size="small">
@@ -615,19 +664,6 @@ export default function Features({ project, appId: fixedAppId }: Props) {
           }
         />
 
-        {/* ✅ Explanation (kept compact, lives "somewhere on this page") */}
-        <Alert severity="info" variant="outlined">
-          <Stack spacing={0.75}>
-            <Typography variant="body2" >
-              {t("features.info.title")}
-            </Typography>
-            <Typography variant="body2" color="text.secondary"><Trans i18nKey="features.info.description" components={tc} /></Typography>
-            <Typography variant="body2" color="text.secondary"><Trans i18nKey="features.info.scope" components={tc} /></Typography>
-          </Stack>
-        </Alert>
-
-        <Divider />
-
         {(loading || saving) && <LinearProgress />}
 
         {error && (
@@ -641,50 +677,66 @@ export default function Features({ project, appId: fixedAppId }: Props) {
             {t("features.noApps")}
           </Alert>
         ) : (
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }}>
-            {!fixedAppId && (
-              <TextField
-                size="small"
-                select
-                label={t("features.app")}
-                value={selectedAppId}
-                onChange={(e) => requestEnvSwitch(e.target.value)}
-                disabled={!hasApps || loading || saving}
-                sx={{ minWidth: 280 }}
-              >
-                {apps.map((app) => (
-                  <MenuItem key={app.id} value={app.id}>
-                    {appTypeLabel(app)}
-                  </MenuItem>
-                ))}
-              </TextField>
-            )}
+          <Stack spacing={1}>
+            {/* Control bar: env context · search */}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }}>
+              {!fixedAppId && (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography sx={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "text.disabled", whiteSpace: "nowrap" }}>
+                    {t("features.app")}
+                  </Typography>
+                  <TextField
+                    size="small"
+                    select
+                    value={selectedAppId}
+                    onChange={(e) => requestEnvSwitch(e.target.value)}
+                    disabled={!hasApps || loading || saving}
+                    sx={{ minWidth: 200 }}
+                  >
+                    {apps.map((app) => (
+                      <MenuItem key={app.id} value={app.id}>
+                        {appTypeLabel(app)}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Stack>
+              )}
 
-            {flags.length > 0 && (
-              <TextField
-                size="small"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t("features.searchPlaceholder")}
-                sx={{ minWidth: 220 }}
-                slotProps={{
-                  input: {
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Search size={14} strokeWidth={1.75} />
-                      </InputAdornment>
-                    ),
-                    endAdornment: searchQuery ? (
-                      <InputAdornment position="end">
-                        <IconButton size="small" onClick={() => setSearchQuery("")}>
-                          <X size={14} strokeWidth={1.75} />
-                        </IconButton>
-                      </InputAdornment>
-                    ) : undefined,
-                  },
-                }}
-              />
-            )}
+              {flags.length > 0 && (
+                <TextField
+                  size="small"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t("features.searchPlaceholder")}
+                  sx={{ flex: 1, maxWidth: { sm: 300 } }}
+                  slotProps={{
+                    input: {
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Search size={14} strokeWidth={1.75} />
+                        </InputAdornment>
+                      ),
+                      endAdornment: searchQuery ? (
+                        <InputAdornment position="end">
+                          <IconButton size="small" onClick={() => setSearchQuery("")}>
+                            <X size={14} strokeWidth={1.75} />
+                          </IconButton>
+                        </InputAdornment>
+                      ) : undefined,
+                    },
+                  }}
+                />
+              )}
+            </Stack>
+
+            {/* Quiet status line + explanation disclosure */}
+            <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography sx={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "text.disabled" }}>
+                {t("features.flagsCount", { current: flagsCount.toLocaleString() })}
+              </Typography>
+              <Box sx={{ flex: 1 }} />
+              <FeaturesAbout expanded={helpExpanded} onToggle={() => setHelpExpanded(!helpExpanded)} t={t} />
+            </Stack>
           </Stack>
         )}
 
@@ -845,20 +897,19 @@ export default function Features({ project, appId: fixedAppId }: Props) {
 
                       <TableCell sx={{ width: 160, minWidth: 140 }}>
                         <Tooltip title={scopeHelp(scope, t)}>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            label={scopeLabel(scope, t)}
+                          <Typography
+                            component="span"
                             sx={{
-                              height: 20,
-                              fontSize: 10,
                               fontFamily: "var(--font-mono)",
+                              fontSize: 10.5,
                               textTransform: "uppercase",
                               letterSpacing: "0.08em",
                               fontWeight: 600,
-                              color: "text.secondary",
+                              color: "text.disabled",
                             }}
-                          />
+                          >
+                            {scopeLabel(scope, t)}
+                          </Typography>
                         </Tooltip>
                       </TableCell>
 
@@ -921,32 +972,17 @@ export default function Features({ project, appId: fixedAppId }: Props) {
                             const noneEnabled = enabledCount === 0;
                             return (
                               <Tooltip title={t("features.appStatusTooltip", { count: enabledCount, total: totalApps })}>
-                                <Chip
-                                  size="small"
-                                  variant="outlined"
-                                  icon={allEnabled ? <CircleCheck size={14} strokeWidth={1.75} /> : noneEnabled ? <Ban size={14} strokeWidth={1.75} /> : undefined}
-                                  label={`${enabledCount}/${totalApps}`}
+                                <Typography
+                                  component="span"
                                   sx={{
                                     fontFamily: "var(--font-mono)",
                                     fontSize: 11,
                                     fontWeight: 600,
-                                    height: 22,
-                                    borderColor: allEnabled
-                                      ? "success.main"
-                                      : noneEnabled
-                                      ? "error.main"
-                                      : "warning.main",
-                                    color: allEnabled
-                                      ? "success.main"
-                                      : noneEnabled
-                                      ? "error.main"
-                                      : "warning.main",
-                                    "& .MuiChip-icon": {
-                                      fontSize: 12,
-                                      color: "inherit",
-                                    },
+                                    color: allEnabled ? "success.main" : noneEnabled ? "text.disabled" : "warning.main",
                                   }}
-                                />
+                                >
+                                  {`${enabledCount}/${totalApps}`}
+                                </Typography>
                               </Tooltip>
                             );
                           })()}
