@@ -14,9 +14,10 @@ import (
 // client ID and secret are mandatory (Naver always requires a client secret,
 // unlike Kakao's opt-in one).
 type updateAppNaverConfigRequest struct {
-	AuthMethodNaver   *bool   `json:"authMethodNaver,omitempty"`
-	NaverClientID     *string `json:"naverClientId,omitempty"`
-	NaverClientSecret *string `json:"naverClientSecret,omitempty"`
+	AuthMethodNaver           *bool   `json:"authMethodNaver,omitempty"`
+	NaverClientID             *string `json:"naverClientId,omitempty"`
+	NaverClientSecret         *string `json:"naverClientSecret,omitempty"`
+	NaverTrustUnverifiedEmail *bool   `json:"naverTrustUnverifiedEmail,omitempty"`
 }
 
 // HandleUpdateAppNaverConfig sets the Naver sign-in toggle and OAuth
@@ -43,6 +44,13 @@ func (handler *RequestHandler) HandleUpdateAppNaverConfig(w http.ResponseWriter,
 	if req.AuthMethodNaver != nil {
 		authMethodNaver = *req.AuthMethodNaver
 	}
+
+	// Opt-in to trusting Naver's (unverifiable) account email. Default keeps
+	// the current value; omitting it never weakens the check.
+	trustUnverifiedEmail := curApp.NaverTrustUnverifiedEmail
+	if req.NaverTrustUnverifiedEmail != nil {
+		trustUnverifiedEmail = *req.NaverTrustUnverifiedEmail
+	}
 	if authMethodNaver && (clientID == nil || *clientID == "" || !postSaveHasSecret) {
 		WriteError(w, r, "error.naverConfigIncomplete", http.StatusBadRequest)
 		return
@@ -56,6 +64,7 @@ func (handler *RequestHandler) HandleUpdateAppNaverConfig(w http.ResponseWriter,
 		AuthMethodNaver:       authMethodNaver,
 		ClientID:              clientID,
 		ClientSecretEncrypted: clientSecretEncrypted,
+		TrustUnverifiedEmail:  trustUnverifiedEmail,
 	})
 	if err != nil {
 		log.Err(err).Msg("failed to update naver config")

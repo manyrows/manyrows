@@ -84,6 +84,7 @@ export type App = {
   naverClientId?: string;
   naverOAuthRedirectUri?: string;
   hasNaverClientSecret?: boolean;
+  naverTrustUnverifiedEmail?: boolean;
   require2fa: boolean;
   passwordMinLength: number;
   passwordMinZxcvbnScore: number;
@@ -851,7 +852,7 @@ type OAuthCredentialConfig = {
   hasSecret: boolean;
   redirectUri?: string | null;
   // Maps the live form values to the provider-specific PUT body.
-  buildBody: (v: { enabled: boolean; clientId: string; secret?: string; clearSecret: boolean }) => Record<string, unknown>;
+  buildBody: (v: { enabled: boolean; clientId: string; secret?: string; clearSecret: boolean; extra: boolean }) => Record<string, unknown>;
   text: {
     title: string;
     desc: string;
@@ -873,6 +874,10 @@ type OAuthCredentialConfig = {
   };
   // Optional "set this up on the provider's side first" note.
   prereq?: { title: string; body: string };
+  // Optional extra boolean toggle beyond the enable switch (e.g. Naver's
+  // "trust unverified email" opt-in). When set, the card renders a checkbox
+  // and passes its value to buildBody as `extra`.
+  extraToggle?: { initial: boolean; label: string; help?: string };
 };
 
 function OAuthCredentialCard({
@@ -891,6 +896,7 @@ function OAuthCredentialCard({
   const [clientId, setClientId] = React.useState(config.clientId);
   const [clientSecret, setClientSecret] = React.useState("");
   const [clearSecret, setClearSecret] = React.useState(false);
+  const [extra, setExtra] = React.useState(config.extraToggle?.initial ?? false);
   const [saving, setSaving] = React.useState(false);
 
   function resetForm() {
@@ -898,6 +904,7 @@ function OAuthCredentialCard({
     setClientId(config.clientId);
     setClientSecret("");
     setClearSecret(false);
+    setExtra(config.extraToggle?.initial ?? false);
   }
 
   // Reset whenever the app prop changes: after any save the parent passes a
@@ -911,7 +918,8 @@ function OAuthCredentialCard({
     enabled !== config.enabled ||
     clientId !== config.clientId ||
     clientSecret.trim().length > 0 ||
-    clearSecret;
+    clearSecret ||
+    (config.extraToggle != null && extra !== config.extraToggle.initial);
 
   const secretAvailable = clientSecret.trim().length > 0 || (config.hasSecret && !clearSecret);
   const configComplete = clientId.trim().length > 0 && secretAvailable;
@@ -938,6 +946,7 @@ function OAuthCredentialCard({
         clientId: clientId.trim(),
         secret: clientSecret.trim() || undefined,
         clearSecret,
+        extra,
       });
       const res = await axios.put<App>(`${cardURL}/${config.endpoint}`, body);
       onSaved(res.data);
@@ -1053,6 +1062,26 @@ function OAuthCredentialCard({
             onCopy={() => copy(config.redirectUri!, text.redirectCopyLabel)}
             help={text.redirectHelp}
             copyTitle={t("apps.copyRedirectUri", { defaultValue: "Copy redirect URI" })}
+          />
+        )}
+        {config.extraToggle && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={extra}
+                onChange={(e) => setExtra(e.target.checked)}
+                disabled={saving}
+              />
+            }
+            label={
+              <Stack spacing={0}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>{config.extraToggle.label}</Typography>
+                {config.extraToggle.help && (
+                  <Typography variant="caption" color="text.secondary">{config.extraToggle.help}</Typography>
+                )}
+              </Stack>
+            }
+            sx={{ ml: 0 }}
           />
         )}
       </Section>
@@ -1654,8 +1683,16 @@ function NaverCard({ app, cardURL, onSaved, onSuccess, onError }: CardProps) {
         clientId: app.naverClientId || "",
         hasSecret: !!app.hasNaverClientSecret,
         redirectUri: app.naverOAuthRedirectUri,
-        buildBody: ({ enabled, clientId, secret, clearSecret }) => {
-          const body: Record<string, unknown> = { authMethodNaver: enabled, naverClientId: clientId };
+        extraToggle: {
+          initial: !!app.naverTrustUnverifiedEmail,
+          label: t("apps.dialog.naverTrustUnverifiedEmail", { defaultValue: "Trust Naver email addresses" }),
+          help: t("apps.dialog.naverTrustUnverifiedEmailHelp", {
+            defaultValue:
+              "Naver doesn't report whether a user verified their email, so ManyRows refuses Naver sign-in until you turn this on. Only enable it if you accept signing users in (and linking existing accounts) by a Naver-supplied email.",
+          }),
+        },
+        buildBody: ({ enabled, clientId, secret, clearSecret, extra }) => {
+          const body: Record<string, unknown> = { authMethodNaver: enabled, naverClientId: clientId, naverTrustUnverifiedEmail: extra };
           if (secret) body.naverClientSecret = secret;
           else if (clearSecret) body.naverClientSecret = "";
           return body;

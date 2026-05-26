@@ -1588,6 +1588,8 @@
   "apps.dialog.naverClientSecretLabel": "Client Secret",
   "apps.dialog.naverRedirectUriHelp": "Register this under your Naver application → API Settings → Callback URL.",
   "apps.dialog.naverRedirectUriLabel": "Callback URL",
+  "apps.dialog.naverTrustUnverifiedEmail": "Trust Naver email addresses",
+  "apps.dialog.naverTrustUnverifiedEmailHelp": "Naver doesn't report whether a user verified their email, so ManyRows refuses Naver sign-in until you turn this on. Only enable it if you accept signing users in (and linking existing accounts) by a Naver-supplied email.",
   "apps.dialog.repoint": "Move app",
   "apps.dialog.repointHelp": "Moves this app to a different identity pool. Only allowed while the app has zero members - otherwise members would be left in the old pool.",
   "apps.dialog.repointPickLabel": "Target pool",

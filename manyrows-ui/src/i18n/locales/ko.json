@@ -1588,6 +1588,8 @@
   "apps.dialog.naverClientSecretLabel": "Client Secret",
   "apps.dialog.naverRedirectUriHelp": "이 값을 Naver 애플리케이션 → API 설정 → Callback URL에 등록하세요.",
   "apps.dialog.naverRedirectUriLabel": "Callback URL",
+  "apps.dialog.naverTrustUnverifiedEmail": "네이버 이메일 주소 신뢰",
+  "apps.dialog.naverTrustUnverifiedEmailHelp": "네이버는 사용자가 이메일을 인증했는지 알려주지 않으므로, 이 옵션을 켜기 전까지 네이버 로그인이 거부됩니다. 네이버가 제공한 이메일로 사용자를 로그인시키고 기존 계정과 연결하는 것을 허용하는 경우에만 켜세요.",
   "apps.dialog.repoint": "앱 이동",
   "apps.dialog.repointHelp": "이 앱을 다른 신원 풀로 이동합니다. 앱에 멤버가 한 명도 없을 때만 허용됩니다. 그렇지 않으면 멤버가 이전 풀에 남게 됩니다.",
   "apps.dialog.repointPickLabel": "대상 풀",

@@ -134,8 +134,8 @@ func (handler *RequestHandler) processNaverCallback(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Naver exposes no email-verification flag; the account email (verified at
-	// Naver signup) is trusted. No email → can't key a user.
+	// Naver provides no email-verification flag at all, so we can't confirm the
+	// account email is owned by this user. No email → can't key a user.
 	if tokenInfo.Email == "" {
 		handler.writeAuthLogFromRequest(r, AuthLogInput{
 			WorkspaceID:   ws.ID,
@@ -147,6 +147,28 @@ func (handler *RequestHandler) processNaverCallback(w http.ResponseWriter, r *ht
 			ActorType:     core.AuthActorSelf,
 		})
 		WriteError(w, r, "error.emailNotProvided", http.StatusBadRequest)
+		return
+	}
+
+	// Naver exposes no email-verification signal, so unlike every other
+	// provider we can't establish that the address is owned by this user.
+	// Refuse sign-in unless the operator has explicitly opted into trusting
+	// Naver's emails for this app — otherwise a Naver account asserting a
+	// victim's address could hijack their account via the email-fallback link
+	// in ResolveOAuthSignInIdentity. Mirrors the external-IdP
+	// TrustUnverifiedEmail gate; default false = secure.
+	if !ctxApp.NaverTrustUnverifiedEmail {
+		handler.writeAuthLogFromRequest(r, AuthLogInput{
+			WorkspaceID:    ws.ID,
+			AppID:          &ctxApp.ID,
+			Event:          core.AuthEventLoginFailed,
+			Method:         core.AuthMethodNaver,
+			Outcome:        core.AuthOutcomeFailed,
+			FailureReason:  core.AuthFailEmailNotVerified,
+			EmailAttempted: tokenInfo.Email,
+			ActorType:      core.AuthActorSelf,
+		})
+		WriteError(w, r, "error.emailNotVerified", http.StatusForbidden)
 		return
 	}
 

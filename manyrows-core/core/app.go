@@ -192,6 +192,12 @@ type App struct {
 	AuthMethodNaver            bool    `json:"authMethodNaver"`
 	NaverClientID              *string `json:"naverClientId,omitempty"`
 	NaverClientSecretEncrypted []byte  `json:"-"` // encrypted at rest, never serialized
+	// NaverTrustUnverifiedEmail opts INTO trusting Naver's account email for
+	// sign-in. Naver exposes no email-verification flag, so without this we
+	// can't confirm the address is owned by the user; default false refuses
+	// Naver sign-in (an unverified address could otherwise hijack an account
+	// via the email-fallback link). Mirrors external_idps.trust_unverified_email.
+	NaverTrustUnverifiedEmail bool `json:"naverTrustUnverifiedEmail"`
 
 	// 2FA
 	Require2FA bool `json:"require2fa"`
