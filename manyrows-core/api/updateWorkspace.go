@@ -159,6 +159,14 @@ func (handler *RequestHandler) UpdateWorkspace(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Changing the slug rewrites the public API path segment (/x/{slug}/...),
+	// breaking every client + S2S integration pointing at the old slug — a
+	// blast radius beyond day-to-day admin. Restrict slug changes to owners;
+	// non-owner admins can still rename the workspace.
+	if slug != ws.Slug && !handler.requireOwner(w, r) {
+		return
+	}
+
 	ws.Name = name
 	ws.Slug = slug
 
@@ -200,6 +208,12 @@ func (handler *RequestHandler) HandleUpdateWorkspaceCookieDomain(w http.Response
 	acc, ok := core.AdminAccountFromContext(r.Context())
 	if !ok || acc == nil {
 		WriteError(w, r, "error.unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Cookie-domain scopes session cookies across hosts — a security-relevant
+	// setting with cross-app blast radius. Owner-only.
+	if !handler.requireOwner(w, r) {
 		return
 	}
 

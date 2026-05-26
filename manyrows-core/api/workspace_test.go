@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"manyrows-core/api"
 	"manyrows-core/auth"
@@ -78,9 +79,11 @@ func setupWorkspaceRouter(t *testing.T) (*chi.Mux, *auth.Service) {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 				return
 			}
-			// Check membership
-			ok, err = testEnv.Repo.IsWorkspaceOwner(ctx, wsID, acc.ID)
-			if err != nil || !ok {
+			// Resolve the workspace-admin role (mirrors the real
+			// adminWorkspaceMiddleware) so role-gated handlers — e.g.
+			// UpdateWorkspace's owner-only slug change — see the caller's role.
+			role, isMember, err := testEnv.Repo.GetWorkspaceAdminRole(ctx, wsID, acc.ID)
+			if err != nil || !isMember {
 				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 				return
 			}
@@ -90,6 +93,7 @@ func setupWorkspaceRouter(t *testing.T) (*chi.Mux, *auth.Service) {
 				return
 			}
 			ctx = core.WithWorkspace(ctx, ws)
+			ctx = core.WithWorkspaceRole(ctx, role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})
@@ -197,6 +201,44 @@ func TestUpdateWorkspace_Success(t *testing.T) {
 	}
 	if resp["slug"] != newSlug {
 		t.Errorf("expected slug %q, got %q", newSlug, resp["slug"])
+	}
+}
+
+// TestUpdateWorkspace_SlugChangeRequiresOwner verifies the owner-only gate on
+// slug changes: a non-owner workspace admin can still rename the workspace, but
+// cannot change its slug (the public API path segment).
+func TestUpdateWorkspace_SlugChangeRequiresOwner(t *testing.T) {
+	router, _ := setupWorkspaceRouter(t)
+
+	owner := testEnv.CreateTestAccount(t, "ws-owner-"+GenerateUniqueSlug("t")+"@example.com")
+	ws := testEnv.CreateTestWorkspace(t, owner, "Orig Name", GenerateUniqueSlug("ws"))
+
+	// A second admin holding the non-owner "admin" role.
+	member := testEnv.CreateTestAccount(t, "ws-member-"+GenerateUniqueSlug("t")+"@example.com")
+	if err := testEnv.Repo.AddWorkspaceAdmin(context.Background(), core.WorkspaceAdmin{
+		WorkspaceID: ws.ID, AccountID: member.ID, Role: "admin", AddedBy: &owner.ID,
+	}); err != nil {
+		t.Fatalf("add member admin: %v", err)
+	}
+	_, claims := testEnv.CreateTestSession(t, member)
+
+	post := func(name, slug string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"name": name, "slug": slug})
+		req := httptest.NewRequest(http.MethodPost, "/admin/workspace/"+ws.ID.String()+"/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		testEnv.SetSessionCookie(t, req, claims)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	// Rename only (slug unchanged) → allowed for a non-owner admin.
+	if rr := post("Renamed By Member", ws.Slug); rr.Code != http.StatusOK {
+		t.Errorf("non-owner rename (same slug): want 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	// Change the slug → forbidden for a non-owner.
+	if rr := post("Renamed By Member", GenerateUniqueSlug("newslug")); rr.Code != http.StatusForbidden {
+		t.Errorf("non-owner slug change: want 403, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
