@@ -1,19 +1,16 @@
 import * as React from "react";
 
+// Public client-side theme knobs are intentionally limited to these three.
+// Richer branding — fonts, corner radius, card background, custom CSS, and
+// white-label (hiding "Powered by ManyRows") — is a paid feature delivered
+// server-side via per-app config set in the admin panel and read in on load,
+// NOT via this client prop. The free surface is kept deliberately small so
+// that shipping the paid branding system later is additive, not a rug-pull.
+// (See appHandler.go `hideBranding`, the reserved first paid lever.)
 export interface AppKitThemeOptions {
   primaryColor?: string;
   backgroundColor?: string;
-  cardBackgroundColor?: string;
   colorMode?: "light" | "dark" | "auto";
-  fontFamily?: string;
-  fontFamilyMono?: string;
-  fontSize?: string;
-  radiusSm?: string;
-  radiusMd?: string;
-  radiusLg?: string;
-  shadowCard?: string;
-  spacing?: string;
-  cssOverrides?: Record<string, string>;
 }
 
 interface AppKitThemeResolved {
@@ -107,25 +104,11 @@ export function resolveTheme(options?: AppKitThemeOptions, systemDark?: boolean)
           "--ak-color-grey-900": "#212121",
         };
 
-  // Card background: explicit option → falls back to surface via CSS var(--ak-color-card-bg, var(--ak-color-surface))
-  if (options?.cardBackgroundColor) {
-    colorVars["--ak-color-card-bg"] = options.cardBackgroundColor;
-  }
-
-  // Design tokens — only set if host overrides, otherwise CSS defaults apply
+  // Only primary color, background, and light/dark are host-settable today.
+  // Fonts, corner radius, card background, and custom CSS are reserved for the
+  // paid server-driven branding system (see AppKitThemeOptions). Card bg falls
+  // back to surface via the CSS var(--ak-color-card-bg, var(--ak-color-surface)).
   const vars: Record<string, string> = { ...colorVars };
-
-  if (options?.fontFamily) vars["--ak-font-family"] = options.fontFamily;
-  if (options?.fontFamilyMono) vars["--ak-font-family-mono"] = options.fontFamilyMono;
-  if (options?.fontSize) vars["--ak-font-size-base"] = options.fontSize;
-  if (options?.radiusSm) vars["--ak-radius-sm"] = options.radiusSm;
-  if (options?.radiusMd) vars["--ak-radius-md"] = options.radiusMd;
-  if (options?.radiusLg) vars["--ak-radius-lg"] = options.radiusLg;
-  if (options?.shadowCard) vars["--ak-shadow-card"] = options.shadowCard;
-
-  if (options?.cssOverrides) {
-    Object.assign(vars, options.cssOverrides);
-  }
 
   return { primaryColor, mode, vars };
 }

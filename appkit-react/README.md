@@ -126,15 +126,17 @@ See [API.md](./API.md) for full type definitions.
   theme={{
     primaryColor: "#7c3aed",
     backgroundColor: "#fafafa",
-    cardBackgroundColor: "#ffffff",
     colorMode: "auto",          // "light" | "dark" | "auto"
-    fontFamily: "Inter, sans-serif",
-    radiusMd: "0.75rem",
   }}
 >
   ...
 </AppKit>
 ```
+
+Richer branding — custom fonts, corner radius, card background, custom CSS,
+and white-label (removing the "Powered by ManyRows" badge) — is a paid feature
+configured per-app in the ManyRows admin panel and applied automatically. It is
+not set through this client prop.
 
 ### Embedded mode (new in 1.3.0)
 

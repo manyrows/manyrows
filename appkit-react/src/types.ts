@@ -107,22 +107,13 @@ type AppKitInitOptions = {
   appId: string;
   baseURL?: string;
 
-  // Theme tokens for the runtime's auth UI. Shape mirrors appkit-ui's
-  // AppKitOptions['theme'] — partial overrides, the runtime fills in
-  // defaults for anything omitted.
+  // Theme tokens for the runtime's auth UI. Mirrors appkit-ui's
+  // AppKitOptions['theme'] — free-tier surface only. Richer branding is a
+  // paid, server-driven feature (admin panel), not a client prop.
   theme?: {
     primaryColor?: string;
     backgroundColor?: string;
-    cardBackgroundColor?: string;
     colorMode?: "light" | "dark" | "auto";
-    fontFamily?: string;
-    fontFamilyMono?: string;
-    fontSize?: string;
-    radiusSm?: string;
-    radiusMd?: string;
-    radiusLg?: string;
-    shadowCard?: string;
-    cssOverrides?: Record<string, string>;
   };
 
   // Optional content rendered above the login/register card.

@@ -213,16 +213,7 @@ export function AppKitAuthed(props: {
 export type AppKitTheme = {
   primaryColor?: string;
   backgroundColor?: string;
-  cardBackgroundColor?: string;
   colorMode?: "light" | "dark" | "auto";
-  fontFamily?: string;
-  fontFamilyMono?: string;
-  fontSize?: string;
-  radiusSm?: string;
-  radiusMd?: string;
-  radiusLg?: string;
-  shadowCard?: string;
-  cssOverrides?: Record<string, string>;
 };
 
 export type AppKitProps = {

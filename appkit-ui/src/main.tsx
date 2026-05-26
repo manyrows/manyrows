@@ -77,20 +77,14 @@ export interface AppKitOptions extends ManyRowsAppKitCallbacks {
   // itself. Override only for unusual setups.
   baseURL?: string;
 
-  // ✅ OPTIONAL: theme customization
+  // ✅ OPTIONAL: theme customization (free tier).
+  // Richer branding (fonts, radius, card bg, custom CSS, white-label) is a paid
+  // feature configured in the admin panel and applied server-side, not here.
+  // Kept minimal on purpose so the paid system is additive, not a rug-pull.
   theme?: {
     primaryColor?: string;
     backgroundColor?: string;
-    cardBackgroundColor?: string;
     colorMode?: "light" | "dark" | "auto";
-    fontFamily?: string;
-    fontFamilyMono?: string;
-    fontSize?: string;
-    radiusSm?: string;
-    radiusMd?: string;
-    radiusLg?: string;
-    shadowCard?: string;
-    cssOverrides?: Record<string, string>;
   };
 
   // OPTIONAL: if you want to render the customer app after login
