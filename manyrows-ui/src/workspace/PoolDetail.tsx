@@ -358,22 +358,19 @@ export default function PoolDetail({ workspace, poolId, tab }: Props) {
                   : tabBase,
             )
           }
-          sx={{ borderBottom: "1px solid", borderColor: "divider", minHeight: 36 }}
+          sx={{ borderBottom: "1px solid", borderColor: "divider" }}
         >
           <Tab
             label={t("userPools.detail.tab.overview", { defaultValue: "Overview" })}
             value="overview"
-            sx={{ textTransform: "none", minHeight: 36 }}
           />
           <Tab
             label={t("userPools.detail.tab.users", { defaultValue: "Users" })}
             value="users"
-            sx={{ textTransform: "none", minHeight: 36 }}
           />
           <Tab
             label={t("userPools.detail.tab.fields", { defaultValue: "User fields" })}
             value="fields"
-            sx={{ textTransform: "none", minHeight: 36 }}
           />
         </Tabs>
 

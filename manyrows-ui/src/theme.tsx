@@ -480,12 +480,13 @@ function getTheme() {
       MuiTabs: {
         styleOverrides: {
           root: {
-            minHeight: 36,
+            minHeight: 40,
             borderBottom: `1px solid rgba(${ink}, 0.08)`,
           },
           indicator: {
             backgroundColor: "#A035B5",
-            height: 1.5,
+            height: 2,
+            borderRadius: "2px 2px 0 0",
           },
         },
       },
@@ -493,22 +494,25 @@ function getTheme() {
       MuiTab: {
         styleOverrides: {
           root: {
-            // Editorial tabs: mono uppercase, dense, calm.
-            // Matches the eyebrow / table-head vocabulary so the
-            // chrome reads as one piece across admin pages.
-            fontFamily:
-              '"Geist Mono", "JetBrains Mono", ui-monospace, Menlo, monospace',
-            textTransform: "uppercase",
-            letterSpacing: "0.14em",
+            // Tabs read as navigation, not captions: readable sans
+            // sentence-case (the mono/uppercase eyebrow vocabulary is
+            // reserved for static labels), with a 2px brand underline
+            // marking the active pane.
+            fontFamily: "var(--font-sans)",
+            textTransform: "none",
+            letterSpacing: 0,
             fontWeight: 500,
-            fontSize: 11,
-            minHeight: 36,
+            fontSize: 13,
+            minHeight: 40,
             minWidth: 0,
-            paddingLeft: 12,
-            paddingRight: 12,
-            color: "#8A8278",
+            paddingLeft: 14,
+            paddingRight: 14,
+            color: "#4A443D",
+            borderRadius: "6px 6px 0 0",
+            transition: "color 120ms ease, background-color 120ms ease",
             "&:hover": {
               color: "#0D0A08",
+              backgroundColor: `rgba(${ink}, 0.04)`,
             },
             "&.Mui-selected": {
               color: "#0D0A08",

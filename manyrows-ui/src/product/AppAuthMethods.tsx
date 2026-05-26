@@ -166,19 +166,6 @@ export default function AppAuthMethods({ project, appId }: Props) {
           variant="scrollable"
           scrollButtons="auto"
           allowScrollButtonsMobile
-          sx={{
-            minHeight: 40,
-            "& .MuiTab-root": {
-              textTransform: "uppercase",
-              minHeight: 40,
-              py: 1,
-              px: 1.75,
-              transition: "background-color 120ms ease",
-              "&:hover": {
-                backgroundColor: "action.hover",
-              },
-            },
-          }}
         >
           <Tab label={t("apps.tab.general", { defaultValue: "General" })} />
           <Tab label={t("apps.tab.email", { defaultValue: "Email" })} />

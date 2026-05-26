@@ -340,12 +340,12 @@ export default function AppInsights({ project, appId }: Props) {
         scrollButtons="auto"
         sx={{ borderBottom: 1, borderColor: "divider" }}
       >
-        <Tab label={t("appInsights.tabs.signups", { defaultValue: "Signups" })} sx={{ textTransform: "none", fontWeight: 600 }} />
-        <Tab label={t("appInsights.tabs.logins", { defaultValue: "Logins" })} sx={{ textTransform: "none", fontWeight: 600 }} />
-        <Tab label={t("appInsights.tabs.activity", { defaultValue: "Active users" })} sx={{ textTransform: "none", fontWeight: 600 }} />
-        <Tab label={t("appInsights.tabs.cumulative", { defaultValue: "Cumulative users" })} sx={{ textTransform: "none", fontWeight: 600 }} />
-        <Tab label={t("appInsights.tabs.failures", { defaultValue: "Login failures" })} sx={{ textTransform: "none", fontWeight: 600 }} />
-        <Tab label={t("appInsights.tabs.sources", { defaultValue: "Sources" })} sx={{ textTransform: "none", fontWeight: 600 }} />
+        <Tab label={t("appInsights.tabs.signups", { defaultValue: "Signups" })} />
+        <Tab label={t("appInsights.tabs.logins", { defaultValue: "Logins" })} />
+        <Tab label={t("appInsights.tabs.activity", { defaultValue: "Active users" })} />
+        <Tab label={t("appInsights.tabs.cumulative", { defaultValue: "Cumulative users" })} />
+        <Tab label={t("appInsights.tabs.failures", { defaultValue: "Login failures" })} />
+        <Tab label={t("appInsights.tabs.sources", { defaultValue: "Sources" })} />
       </Tabs>
 
       {tab === 0 && (

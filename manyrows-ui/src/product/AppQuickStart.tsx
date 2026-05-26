@@ -274,8 +274,8 @@ function MyApp() {
       <PageHeader title={t("apps.quickStart")} mb={0} />
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tab label="React" sx={{ textTransform: "none", fontWeight: 600 }} />
-        <Tab label="Vanilla JS" sx={{ textTransform: "none", fontWeight: 600 }} />
+        <Tab label="React" />
+        <Tab label="Vanilla JS" />
       </Tabs>
 
       {tab === 0 && (
