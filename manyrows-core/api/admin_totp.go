@@ -438,7 +438,7 @@ func (handler *RequestHandler) verifyAccountPassword(ctx context.Context, accoun
 func generateBackupCodes(n int) ([]string, error) {
 	codes := make([]string, n)
 	for i := range codes {
-		b := make([]byte, 4) // 4 bytes = 8 hex chars
+		b := make([]byte, 8) // 8 bytes = 16 hex chars (64-bit; defense-in-depth)
 		if _, err := rand.Read(b); err != nil {
 			return nil, err
 		}
