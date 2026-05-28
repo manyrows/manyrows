@@ -96,8 +96,12 @@ export default function ProductHome(props: Props) {
   React.useEffect(() => {
     if (appId) {
       setLastApp({ id: appId, type: appType || undefined });
+    } else if (page === "apps") {
+      // Explicitly stepping back to the apps list should collapse the
+      // sticky sub-tree; otherwise (Roles, Permissions, ...) keep it.
+      setLastApp(null);
     }
-  }, [appId, appType]);
+  }, [appId, appType, page]);
 
   React.useEffect(() => {
     setLastApp(null);
