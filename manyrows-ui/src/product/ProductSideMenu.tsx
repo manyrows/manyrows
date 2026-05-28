@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   ArrowLeftRight,
   Palette,
+  Braces,
   Sparkles,
   Rocket,
   History,
@@ -175,6 +176,31 @@ export default function ProductSideMenu({ value, basePath, workspaceBasePath, ap
                 size={11}
                 strokeWidth={2}
                 aria-label={t("branding.premium")}
+              />
+            </Box>
+          }
+        />
+        <NavItem
+          label={t("project.nav.schema")}
+          value="schema"
+          icon={<Braces size={ICON_SIZE} strokeWidth={ICON_STROKE} />}
+          selected={effectiveValue}
+          basePath={basePath}
+          trailing={
+            <Box
+              component="span"
+              sx={{
+                display: "inline-flex",
+                alignItems: "center",
+                color: "primary.main",
+                ml: 0.5,
+                flexShrink: 0,
+              }}
+            >
+              <Sparkles
+                size={11}
+                strokeWidth={2}
+                aria-label={t("schema.premium")}
               />
             </Box>
           }
