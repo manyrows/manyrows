@@ -48,7 +48,7 @@ const ICON_STROKE = 1.75;
 
 // WorkspaceSideMenu surfaces every workspace-level page in a left
 // rail so Settings / Team / Email aren't hidden behind a single
-// "Settings" button. Mirrors ProductSideMenu / AppSideMenu density
+// "Settings" button. Mirrors ProductSideMenu density
 // and styling so the chrome reads as one piece across all three
 // admin levels.
 export default function WorkspaceSideMenu({ value, basePath }: Props) {

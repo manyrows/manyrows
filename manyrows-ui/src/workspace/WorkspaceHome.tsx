@@ -109,7 +109,7 @@ export default function WorkspaceHome({ workspace, page, poolId }: WorkspaceHome
     <Box
       sx={{
         display: { xs: "block", md: "grid" },
-        gridTemplateColumns: { md: "200px 1fr" },
+        gridTemplateColumns: { md: "240px 1fr" },
         minHeight: { md: "calc(100vh - 52px)" },
       }}
     >

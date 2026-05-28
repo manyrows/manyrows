@@ -36,7 +36,6 @@ type AppRow = {
   enabled: boolean;
 };
 import ProductSideMenu from "./ProductSideMenu.tsx";
-import AppSideMenu from "./AppSideMenu.tsx";
 import Loader from "../Loader.tsx";
 
 const ProductSettings = React.lazy(() => import("./ProductSettings.tsx"));
@@ -88,6 +87,20 @@ export default function ProductHome(props: Props) {
   const [apps, setApps] = React.useState<AppRow[]>([]);
   const [switcherAnchor, setSwitcherAnchor] = React.useState<null | HTMLElement>(null);
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
+  // Remember the last app the user opened in this product so the sidebar
+  // keeps it expanded when they jump to project-level pages (Roles,
+  // Permissions, ...). Cleared when productId changes.
+  const [lastApp, setLastApp] = React.useState<{ id: string; type?: string } | null>(null);
+
+  React.useEffect(() => {
+    if (appId) {
+      setLastApp({ id: appId, type: appType || undefined });
+    }
+  }, [appId, appType]);
+
+  React.useEffect(() => {
+    setLastApp(null);
+  }, [productId]);
 
   // Close drawer when route changes
   React.useEffect(() => {
@@ -240,26 +253,34 @@ export default function ProductHome(props: Props) {
     );
   }
 
-  const sideMenu =
-    page === "appDetail" && appId ? (
-      <AppSideMenu
-        projectBasePath={`/app/workspace/${workspace.id}/products/${productId}`}
-        appBasePath={`/app/workspace/${workspace.id}/products/${productId}/apps/${appId}`}
-        value={appPage || "appDetail"}
-      />
-    ) : (
-      <ProductSideMenu
-        value={page}
-        basePath={`/app/workspace/${workspace.id}/products/${productId}`}
-        workspaceBasePath={`/app/workspace/${workspace.id}`}
-      />
-    );
+  // Show the app sub-tree when we're inside an app OR when the user
+  // recently was — keeps the context visible while they pop out to
+  // project pages like Roles.
+  const sidebarAppId = appId || lastApp?.id;
+  const sidebarAppType = appId ? appType : (lastApp?.type ?? "");
+  const sideMenu = (
+    <ProductSideMenu
+      value={page}
+      basePath={`/app/workspace/${workspace.id}/products/${productId}`}
+      workspaceBasePath={`/app/workspace/${workspace.id}`}
+      app={
+        sidebarAppId
+          ? {
+              appType: sidebarAppType,
+              appBasePath: `/app/workspace/${workspace.id}/products/${productId}/apps/${sidebarAppId}`,
+              appPage: appId ? (appPage || "appDetail") : "",
+              onOpenSwitcher: (el) => setSwitcherAnchor(el),
+            }
+          : undefined
+      }
+    />
+  );
 
   return (
     <Box
       sx={{
         display: { xs: "block", md: "grid" },
-        gridTemplateColumns: { md: "200px 1fr" },
+        gridTemplateColumns: { md: "240px 1fr" },
         minHeight: { md: "calc(100vh - 52px)" },
       }}
     >
@@ -431,65 +452,6 @@ export default function ProductHome(props: Props) {
                     </>
                   )}
                 </Stack>
-                <Menu
-                  anchorEl={switcherAnchor}
-                  open={Boolean(switcherAnchor)}
-                  onClose={() => setSwitcherAnchor(null)}
-                  slotProps={{ paper: { sx: { minWidth: 280, maxHeight: 320 } } }}
-                >
-                  {apps.map((ap) => (
-                    <MenuItem
-                      key={ap.id}
-                      selected={ap.id === appId}
-                      onClick={() => {
-                        setSwitcherAnchor(null);
-                        if (ap.id !== appId) {
-                          nav(`/app/workspace/${workspace.id}/products/${productId}/apps/${ap.id}/${appPage || ""}`);
-                        }
-                      }}
-                    >
-                      <ListItemIcon>
-                        <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: ap.enabled ? "primary.main" : "text.disabled" }}>
-                          <Code size={16} strokeWidth={1.75} />
-                        </Box>
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={
-                          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-                            <Typography
-                              sx={{
-                                fontSize: 14,
-                                fontWeight: 500,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                minWidth: 0,
-                              }}
-                            >
-                              {ap.name || t("apps.untitledApp", { defaultValue: "Untitled App" })}
-                            </Typography>
-                            {ap.type && (
-                              <Chip
-                                size="small"
-                                label={appTypeLabel({ type: ap.type })}
-                                variant="outlined"
-                                sx={{
-                                  height: 20,
-                                  fontSize: 10.5,
-                                  fontWeight: 600,
-                                  flexShrink: 0,
-                                  ...(ap.type === "prod" && { borderColor: "error.main", color: "error.main" }),
-                                  ...(ap.type === "staging" && { borderColor: "warning.main", color: "warning.main" }),
-                                  ...(ap.type === "dev" && { borderColor: "success.main", color: "success.main" }),
-                                }}
-                              />
-                            )}
-                          </Stack>
-                        }
-                      />
-                    </MenuItem>
-                  ))}
-                </Menu>
                 <Box sx={{ borderBottom: "1px solid", borderColor: "divider", mt: 2 }} />
               </Box>
             )}
@@ -547,6 +509,69 @@ export default function ProductHome(props: Props) {
             </React.Suspense>
         </Box>
       </Box>
+
+      {/* App switcher — triggered from the page header (when in app) or
+          from the sidebar (any page). Lifted out so the anchor + menu
+          render regardless of which page block is active. */}
+      <Menu
+        anchorEl={switcherAnchor}
+        open={Boolean(switcherAnchor)}
+        onClose={() => setSwitcherAnchor(null)}
+        slotProps={{ paper: { sx: { minWidth: 280, maxHeight: 320 } } }}
+      >
+        {apps.map((ap) => (
+          <MenuItem
+            key={ap.id}
+            selected={ap.id === sidebarAppId}
+            onClick={() => {
+              setSwitcherAnchor(null);
+              if (ap.id !== appId) {
+                nav(`/app/workspace/${workspace.id}/products/${productId}/apps/${ap.id}/${appId ? (appPage || "") : ""}`);
+              }
+            }}
+          >
+            <ListItemIcon>
+              <Box component="span" sx={{ display: "inline-flex", alignItems: "center", color: ap.enabled ? "primary.main" : "text.disabled" }}>
+                <Code size={16} strokeWidth={1.75} />
+              </Box>
+            </ListItemIcon>
+            <ListItemText
+              primary={
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                  <Typography
+                    sx={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                    }}
+                  >
+                    {ap.name || t("apps.untitledApp", { defaultValue: "Untitled App" })}
+                  </Typography>
+                  {ap.type && (
+                    <Chip
+                      size="small"
+                      label={appTypeLabel({ type: ap.type })}
+                      variant="outlined"
+                      sx={{
+                        height: 20,
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        flexShrink: 0,
+                        ...(ap.type === "prod" && { borderColor: "error.main", color: "error.main" }),
+                        ...(ap.type === "staging" && { borderColor: "warning.main", color: "warning.main" }),
+                        ...(ap.type === "dev" && { borderColor: "success.main", color: "success.main" }),
+                      }}
+                    />
+                  )}
+                </Stack>
+              }
+            />
+          </MenuItem>
+        ))}
+      </Menu>
     </Box>
   );
 }
